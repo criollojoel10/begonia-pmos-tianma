@@ -61,6 +61,8 @@ jobs:
 
       - name: Clone pmaports + apply MR !8852
         run: |
+          git config --global user.name "criollojoel10"
+          git config --global user.email "98426429+criollojoel10@users.noreply.github.com"
           git clone --filter=blob:none https://gitlab.postmarketos.org/postmarketOS/pmaports.git "$PMAPORTS_DIR"
           git -C "$PMAPORTS_DIR" checkout e2572a0dc907f57b99f892b35bd24738a641e1a3
           git -C "$PMAPORTS_DIR" am --3way "$GITHUB_WORKSPACE/.github/patches/mr8852.patch"
