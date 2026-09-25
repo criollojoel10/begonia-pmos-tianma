@@ -20,6 +20,41 @@ La solución es el **MR !8852** de Dinolek ("Update mt6785 kernel to 7.1, add su
 
 Este repo aplica ese MR como parche y selecciona la variante `tianma` vía `kernel = tianma` en la config de pmbootstrap.
 
+## Método rápido confirmado: swap de firmware tianma en el kernel 6.16.4 (sin rebuild)
+
+**No hace falta kernel 7.1 ni MR !8852 para el touch en 6.16.4.** El touch Tianma funciona copiando el firmware tianma con el **nombre que el DTB espera** (`nt36672a_begonia_csot.bin`), porque el driver `novatek-nvt-ts-core` lee `firmware-name` del device-tree y hace `request_firmware` con ese nombre exacto. El DTB 6.16.4 solo referencia la variante csot, así que el binario tianma debe usar ese nombre.
+
+Pasos (en el device, vía SSH):
+
+```
+# 1) Confirmar que el firmware es tianma (no csot):
+md5sum /lib/firmware/novatek/nt36672a_begonia_tianma.bin.zst
+#    tianma: 7d67c2e9167f1a630576c177c1b831f7  (53321 B)
+#    csot:   52f5e96f84fbdd6cbed2e98790a202df  (53731 B)
+
+# 2) Copiar tianma bajo el nombre que espera el DTB, en ambas rutas:
+sudo cp /lib/firmware/novatek/nt36672a_begonia_tianma.bin.zst \
+        /lib/firmware/novatek/nt36672a_begonia_csot.bin.zst
+sudo cp /lib/firmware/novatek/nt36672a_begonia_csot.bin.zst \
+        /usr/lib/firmware/novatek/nt36672a_begonia_csot.bin.zst
+
+# 3) Verificar que ahora el "csot" es el tianma:
+md5sum /lib/firmware/novatek/nt36672a_begonia_csot.bin.zst  # = 7d67c2e9...
+
+# 4) Reiniciar.
+sudo reboot
+```
+
+Verificación tras el reinicio:
+
+```
+lsmod | grep novatek          # novatek_nvt_ts_spi + novatek_nvt_ts_core cargados
+dmesg | grep -i novatek       # sin errores de request_firmware
+cat /proc/bus/input/devices   # el touch (input2, spi@11019000) con ejes correctos
+```
+
+Resultado confirmado: táctil Tianma con ejes correctos en pmOS 6.16.4, sin compilar nada.
+
 ## Cómo funciona el workflow
 
 `.github/workflows/build-tianma.yaml` (basado en el workflow `combined` de `begonia-postmarketos-build`):
