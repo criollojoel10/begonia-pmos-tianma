@@ -116,6 +116,23 @@ uname -r          # 7.1.x-postmarketos-mediatek-mt6785
 
 Touch Tianma: en `/proc/device-tree` o `dmesg` debe aparecer el panel `xiaomi,begonia-tianma-nt36672a`.
 
+## Estado del WiFi (verificado en el dispositivo, kernel 6.16.4)
+
+El SoC WiFi/BT de begonia usa el stack propietario de MediaTek (`wmt`/`connsys`/`btif`),
+que NO está en el kernel 6.16.4 mainline. Verificado en el dispositivo real:
+
+- Sin nodo WiFi/BT en el device-tree (`/proc/device-tree` sin `wifi`/`wlan`/`consys`).
+- Sin drivers de radio compilados (ni `mt76` ni `wmt`/`connsys` ni `btmtk`). Solo existen
+  `cfg80211.ko` y `mac80211.ko` (infraestructura, sin radio detrás).
+- Sin firmware en `/lib/firmware/mediatek/`.
+- Único rfkill presente: `nfc0` (NFC, no WiFi/BT).
+
+Conclusión: **no se puede activar WiFi en este kernel**. Para el WiFi hace falta un rebuild
+con la rama `begonia-conn-wifi` del fork `mt6785-mainline/linux` (forward-port del stack
+vendor a 6.16: `drivers/misc/mediatek/btif`, `srh_patch`, DTS con nodo WiFi) más el blob de
+conectividad del fork `mt6785-mainline/firmware`. El driver wireless USB (`mt76`, `rtl8xxxu`)
+también se puede compilar como alternativa/dongle, pero no se cargó ninguno en 6.16.4.
+
 ## Errores que no hay que repetir
 
 - **No swapear solo el kernel** (6.16 → 7.1) sin regenerar el initramfs: los `.ko` del initramfs llevan `vermagic` de 6.16 y el kernel 7.1 no los carga → sin display/touch. Por eso se hace build completo con pmbootstrap.
