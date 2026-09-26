@@ -79,8 +79,15 @@ jobs:
           git init -q "$PMAPORTS_DIR"
           git -C "$PMAPORTS_DIR" remote add origin https://gitlab.postmarketos.org/postmarketOS/pmaports.git
           git -C "$PMAPORTS_DIR" fetch -q --depth=1 origin "$PMAPORTS_REF"
-          git -C "$PMAPORTS_DIR" checkout -q FETCH_HEAD
+          # pmbootstrap lee literalmente `git show origin/main:channels.cfg`, asi
+          # que un fetch por SHA no basta: deja HEAD detached y sin origin/main
+          # y aborta con "Failed to read channels.cfg from 'origin/main'". Hay
+          # que crear la ref a mano apuntando al commit fijado.
+          git -C "$PMAPORTS_DIR" update-ref refs/remotes/origin/main FETCH_HEAD
+          git -C "$PMAPORTS_DIR" checkout -q -B main refs/remotes/origin/main
           git -C "$PMAPORTS_DIR" log -1 --oneline
+          git -C "$PMAPORTS_DIR" show origin/main:channels.cfg >/dev/null \
+            && echo "channels.cfg legible desde origin/main"
 
       - name: Apply overlays (kernel APKBUILD, firmware, device) for begonia-conn-wifi
         run: |
