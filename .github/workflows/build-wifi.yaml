@@ -23,6 +23,14 @@ on:
         options:
           - "true"
           - "false"
+      mtk_gen4m:
+        description: 'Stack WiFi/BT interno MediaTek (gen4m). OFF = wifi por dongle (recomendado: build fiable)'
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
 
 jobs:
   build:
@@ -129,7 +137,9 @@ jobs:
       - name: Patch pmbootstrap (CI fixes)
         run: python3 .github/scripts/patch_pmbootstrap.py
 
-      - name: Enable USB Ethernet & WiFi dongle drivers + MTK connectivity
+      - name: Enable USB Ethernet & WiFi dongle drivers (+ MTK gen4m opcional)
+        env:
+          MTK_GEN4M: ${{ inputs.mtk_gen4m }}
         run: bash .github/scripts/enable_kernel_drivers.sh
 
       - name: Force rebuild kernel (begonia-conn-wifi) with new drivers

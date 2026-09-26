@@ -43,14 +43,40 @@ for line in \
   "# Bluetooth USB (Realtek RTL8821C, CSR dongles)" \
   "CONFIG_BT_LE=y" \
   "CONFIG_BT_HCIBTUSB=m" \
-  "" \
-  "# MTK connectivity stack (begonia-conn-wifi): WMT + gen4m WLAN + BTIF" \
-  "CONFIG_MTK_WMT_FWPORT=m" \
-  "CONFIG_MTK_WMT_DRV=m" \
-  "CONFIG_MTK_WLAN_GEN4M=m" \
-  "CONFIG_MTK_WMT_FWPORT_BTIF=m"; do
+  ""; do
   echo "$line" >> "$KCONFIG"
 done
+
+# Stack WiFi/BT interno MediaTek (begonia-conn-wifi). Opt-in con MTK_GEN4M=1.
+#
+# Por defecto OFF: wlan_gen4m.ko llama a wireless_send_event(), que solo se
+# compila con CONFIG_WEXT_CORE. Sin esa opcion modpost aborta el build con
+#     ERROR: modpost: "wireless_send_event" [.../wlan_gen4m.ko] undefined!
+# El wifi por dongle (rtl8xxxu/mt76) no depende de este stack.
+if [ "${MTK_GEN4M:-0}" = "1" ]; then
+  echo "=== Enabling MTK connectivity stack (wlan interno) ==="
+  for line in \
+    "CONFIG_WEXT_CORE=y" \
+    "CONFIG_MTK_WMT_FWPORT=m" \
+    "CONFIG_MTK_WMT_DRV=m" \
+    "CONFIG_MTK_WLAN_GEN4M=m" \
+    "CONFIG_MTK_WMT_FWPORT_BTIF=m"; do
+    echo "$line" >> "$KCONFIG"
+  done
+  grep -E '^(CONFIG_WEXT_CORE|CONFIG_MTK_WMT|CONFIG_MTK_WLAN)' "$KCONFIG" \
+    || { echo "ERROR: no se aplico el stack MTK" >&2; exit 1; }
+else
+  echo "=== MTK gen4m stack DISABLED (default): wifi via dongle ==="
+  # El script es idempotente: si el config ya traia el stack (o una corrida
+  # previa lo dejo a medias), se quita por completo. olddefconfig lo
+  # descartaria igual, pero dejarlo en el .config confunde la inspeccion.
+  sed -i -E '/^CONFIG_(MTK_WMT_FWPORT|MTK_WMT_DRV|MTK_WLAN_GEN4M|MTK_WMT_FWPORT_BTIF)=/d' "$KCONFIG"
+  if grep -qE '^CONFIG_(MTK_WMT|MTK_WLAN)' "$KCONFIG"; then
+    echo "ERROR: quedaron lineas del stack MTK en $KCONFIG" >&2
+    exit 1
+  fi
+  echo "    (reactivar con MTK_GEN4M=1; ver nota sobre wireless_send_event)"
+fi
 
 echo "=== Verification ==="
 grep -E '^(CONFIG_USB_NET|CONFIG_USB_RTL|CONFIG_RTL8|CONFIG_WLAN_VENDOR|CONFIG_MT76|CONFIG_MT792|CONFIG_USB_SERIAL_PL2303|CONFIG_USB_SERIAL_FTDI|CONFIG_USB_SERIAL_CP210)' "$KCONFIG"
