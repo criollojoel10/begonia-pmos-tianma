@@ -36,6 +36,11 @@ for line in \
   "CONFIG_RTL8XXXU=m" \
   "" \
   "# Wi-Fi Realtek 88xx por USB (8812AU / 8821AU / 8822BU: los dongles AC)" \
+  "# OJO: RTW88 es el menuconfig PADRE (tristate, depends on MAC80211) y todos" \
+  "# los drivers de la familia viven dentro de `if RTW88`. Sin el padre a m," \
+  "# olddefconfig descarta CORE/USB/8812AU/8821AU/8822BU en silencio y no se" \
+  "# compila ningun rtw88_*.ko (es lo que paso en el run 36277664585)." \
+  "CONFIG_RTW88=m" \
   "CONFIG_RTW88_CORE=m" \
   "CONFIG_RTW88_USB=m" \
   "CONFIG_RTW88_8812AU=m" \
@@ -58,6 +63,8 @@ for line in \
   "" \
   "# Bluetooth USB (Realtek RTL8821C, CSR dongles)" \
   "CONFIG_BT_LE=y" \
+  "CONFIG_BT_RFCOMM=m" \
+  "CONFIG_BT_BNEP=m" \
   "CONFIG_BT_HCIBTUSB=m" \
   ""; do
   echo "$line" >> "$KCONFIG"

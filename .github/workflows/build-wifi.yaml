@@ -303,12 +303,15 @@ jobs:
           # Serial USB:   pl2303, ftdi_sio, cp210x
           # Si falta alguno, el build se da por verde pero el dongle no funcionaria:
           # mejor fallar aqui que descubrirlo con el movil en la mano.
+          # El grep es /\.ko(\.comp)?$: con "/foo.ko" a secas tambien pasaria un
+          # "foo.ko.bar" cualquiera, y con `grep -q "/foo.ko"` un modulo
+          # compilado dentro del kernel (sin .ko) contaria como presente.
           missing=0
           for m in asix ax88179_178a rtl8150 r8152 cdc_ether cdc_eem cdc_ncm \
                    dm9601 smsc95xx sierra_net rtl8xxxu rtw88_8812au rtw88_8821au \
                    rtw88_8822bu mt76-usb mt76x0u mt76x2u mt7921u \
                    btusb pl2303 ftdi_sio cp210x; do
-            if grep -q "/${m}\.ko" /tmp/rootfs-mods.txt; then
+            if grep -qE "/${m}\.ko(\.[a-z0-9]+)?$" /tmp/rootfs-mods.txt; then
               echo "OK dongle ${m}.ko"
             else
               echo "::error::el rootfs no trae ${m}.ko (ruta por dongle)"
@@ -322,7 +325,7 @@ jobs:
             echo "mtk_gen4m=false: no se exige el stack interno (wifi por dongle)"
           else
             for m in wmt_drv wlan_gen4m mtk-vendor-btif; do
-              if grep -q "/${m}\.ko" /tmp/rootfs-mods.txt; then
+              if grep -qE "/${m}\.ko(\.[a-z0-9]+)?$" /tmp/rootfs-mods.txt; then
                 echo "OK mtk ${m}.ko"
               else
                 echo "::error::el kernel no trae ${m}.ko (mtk_gen4m=true)"
