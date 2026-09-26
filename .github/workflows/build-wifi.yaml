@@ -165,6 +165,29 @@ jobs:
           key: begonia-wifi-ccache-v1
           restore-keys: begonia-wifi-ccache-v1
 
+      - name: Fix ownership of the restored ccache dir
+        run: |
+          set -euxo pipefail
+          # pmbootstrap hace `ln -s /mnt/pmbootstrap/ccache /home/pmos/.ccache` y
+          # `chown pmos:pmos /mnt/pmbootstrap/ccache` SIN -R, y ese mount point es un
+          # bind mount de cache_ccache_aarch64 en el host. Con un cache MISS el dir
+          # esta vacio y ccache se crea tmp/ el mismo -> funciona. Con un cache HIT,
+          # actions/cache restaura tmp/ y sus ficheros con el uid del runner, el chown
+          # no baja al contenido, y ccache revienta al compilar:
+          #   ccache: error: failed to create temporary file for
+          #   /home/pmos/.ccache/tmp/cpp_stdout.tmp.XXXXXX.s: Permission denied
+          # que ademas hace fallar el kernel entero, porque Kconfig.include aborta si
+          # as-version.sh no obtiene "GNU assembler" del CC (que aqui es ccache).
+          # Por eso arreglamos la propiedad de forma RECURSIVA y sin depender del uid.
+          for d in /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64 \
+                   /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64; do
+            [ -d "$d" ] || sudo mkdir -p "$d"
+            sudo chown -R 1000:1000 "$d"
+            sudo chmod -R a+rwX "$d"
+          done
+          ls -ld /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+          ls -ld /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64/tmp || true
+
       - name: Patch pmbootstrap (CI fixes)
         run: python3 .github/scripts/patch_pmbootstrap.py
 
