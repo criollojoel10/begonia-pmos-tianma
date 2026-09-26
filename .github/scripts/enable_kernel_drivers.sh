@@ -56,29 +56,45 @@ done
 
 # Stack WiFi/BT interno MediaTek (begonia-conn-wifi). Opt-in con MTK_GEN4M=true.
 #
-# Por defecto OFF: wlan_gen4m.ko llama a wireless_send_event(), que solo se
-# compila con CONFIG_WEXT_CORE. Sin esa opcion modpost aborta el build con
+# Por defecto OFF: wlan_gen4m.ko llama a wireless_send_event(), que vive en
+# net/wireless/wext-core.c. Sin ese objeto modpost aborta el build con
 #     ERROR: modpost: "wireless_send_event" [.../wlan_gen4m.ko] undefined!
+#
+# OJO: hay que activar CONFIG_CFG80211_WEXT, NO CONFIG_WEXT_CORE. En
+# net/wireless/Kconfig:
+#     config WEXT_CORE
+#         def_bool y
+#         depends on CFG80211_WEXT || WIRELESS_EXT
+#     config CFG80211_WEXT
+#         bool "cfg80211 wireless extensions compatibility"
+#         select WEXT_CORE
+# WEXT_CORE es un simbolo *oculto* (def_bool, sin prompt): no se puede forzar,
+# olddefconfig lo recalcula a n y borra la linea del .config. CFG80211_WEXT si
+# es un bool con prompt y es el que hace `select WEXT_CORE` (y WEXT_PROC), asi
+# que es el que hay que poner.
 # El wifi por dongle (rtl8xxxu/mt76) no depende de este stack.
 if [ "$MTK_GEN4M_ON" = "1" ]; then
   echo "=== Enabling MTK connectivity stack (wlan interno) ==="
   for line in \
-    "CONFIG_WEXT_CORE=y" \
+    "CONFIG_CFG80211_WEXT=y" \
     "CONFIG_MTK_WMT_FWPORT=m" \
     "CONFIG_MTK_WMT_DRV=m" \
     "CONFIG_MTK_WLAN_GEN4M=m" \
     "CONFIG_MTK_WMT_FWPORT_BTIF=m"; do
     echo "$line" >> "$KCONFIG"
   done
-  grep -E '^(CONFIG_WEXT_CORE|CONFIG_MTK_WMT|CONFIG_MTK_WLAN)' "$KCONFIG" \
+  grep -E '^(CONFIG_CFG80211_WEXT|CONFIG_MTK_WMT|CONFIG_MTK_WLAN)' "$KCONFIG" \
     || { echo "ERROR: no se aplico el stack MTK" >&2; exit 1; }
 else
   echo "=== MTK gen4m stack DISABLED (default): wifi via dongle ==="
   # El script es idempotente: si el config ya traia el stack (o una corrida
   # previa lo dejo a medias), se quita por completo. olddefconfig lo
   # descartaria igual, pero dejarlo en el .config confunde la inspeccion.
-  sed -i -E '/^CONFIG_(MTK_WMT_FWPORT|MTK_WMT_DRV|MTK_WLAN_GEN4M|MTK_WMT_FWPORT_BTIF)=/d' "$KCONFIG"
-  if grep -qE '^CONFIG_(MTK_WMT|MTK_WLAN)' "$KCONFIG"; then
+  # Se quita tambien CFG80211_WEXT (y el WEXT_CORE que dejaba una version
+  # anterior de este script) para que el build sin stack sea identico al de
+  # pmaports.
+  sed -i -E '/^CONFIG_(MTK_WMT_FWPORT|MTK_WMT_DRV|MTK_WLAN_GEN4M|MTK_WMT_FWPORT_BTIF|CFG80211_WEXT|WEXT_CORE)=/d' "$KCONFIG"
+  if grep -qE '^CONFIG_(MTK_WMT|MTK_WLAN|CFG80211_WEXT|WEXT_CORE)' "$KCONFIG"; then
     echo "ERROR: quedaron lineas del stack MTK en $KCONFIG" >&2
     exit 1
   fi

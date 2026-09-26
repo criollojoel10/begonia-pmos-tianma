@@ -129,12 +129,23 @@ el input existe en vez de estar siempre activo:
 | `mtk_gen4m` | Qué pasa |
 |---|---|
 | `false` (por defecto) | Stack MTK fuera. El kernel compila. Los dongles USB (`rtl8xxxu`, `mt76`) no lo necesitan. |
-| `true` | Añade `MTK_WMT_FWPORT`, `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF` **y `CONFIG_WEXT_CORE=y`**, que es lo que resuelve el símbolo. |
+| `true` | Añade `MTK_WMT_FWPORT`, `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF` **y `CONFIG_CFG80211_WEXT=y`**. |
 
-Ambos caminos se compilaron y llegaron hasta `modules_install` sin errores de modpost, así que el
-stack es viable; lo que no está verificado es que el wifi interno funcione en el dispositivo, porque
-falta probarlo en hardware. Por eso el run por defecto es el de los dongles: es el que desbloquea
-usar el hub ahora mismo.
+Sobre el símbolo: hay que activar **`CFG80211_WEXT`**, no `WEXT_CORE`. En `net/wireless/Kconfig`,
+`WEXT_CORE` es `def_bool y` + `depends on CFG80211_WEXT || WIRELESS_EXT`, o sea un símbolo **oculto**
+sin prompt: poner `CONFIG_WEXT_CORE=y` a mano no sirve, `make olddefconfig` lo recalcula a `n` y borra
+la línea del `.config`, y entonces `modpost` aborta el kernel entero con
+`ERROR: modpost: "wireless_send_event" [.../wlan_gen4m.ko] undefined!` (es el fallo del run
+`36260038275`). `CFG80211_WEXT` sí es un bool con prompt y hace `select WEXT_CORE` (y con él
+`WEXT_PROC`), que es justo lo que compila `net/wireless/wext-core.o` → `wireless_core.ko`.
+
+Con `mtk_gen4m=false` el kernel compila y quedan los drivers de dongle. Con `true`, el kernel llega
+hasta `modules_install` **verificado** (run `36260038275` compiló el stack entero y solo falló en
+`modpost` por el símbolo anterior, ya corregido). Lo que **no** está verificado es que el wifi interno
+funcione en el dispositivo: el propio Kconfig del fork lo llama *"work-in-progress bring-up vehicle"*,
+el DTS trae el `WIFI_EINT` como *placeholder* (`GIC_SPI 78`, no sourceado del DT de fábrica) y los
+pines `gpio_combo_*` están omitidos, así que es razonable que el wlan no llegue a levantar. El driver
+tampoco se autoprobea: hay que hacer `modprobe` y usar el trigger `/dev/wmtWifi`.
 
 Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
 
