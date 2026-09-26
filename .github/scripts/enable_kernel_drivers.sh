@@ -4,6 +4,13 @@ set -euo pipefail
 
 KCONFIG="${PMAPORTS_DIR}/device/testing/linux-postmarketos-mediatek-mt6785/config-postmarketos-mediatek-mt6785.aarch64"
 
+# El workflow pasa MTK_GEN4M como "true"/"false" (input choice), no como 1/0.
+# Aceptamos ambas formas para poder invocar el script a mano tambien.
+MTK_GEN4M_ON=0
+case "${MTK_GEN4M:-0}" in
+  1|true|TRUE|yes) MTK_GEN4M_ON=1 ;;
+esac
+
 echo "=== Current USB/WiFi config ==="
 grep -E '^(CONFIG_USB_NET|CONFIG_USB_RTL|CONFIG_RTL8|CONFIG_WLAN_VENDOR|CONFIG_MT76|CONFIG_USB_SERIAL_PL2303|CONFIG_USB_SERIAL_FTDI|CONFIG_USB_SERIAL_CP210)' "$KCONFIG" || echo "No USB net dongles enabled"
 
@@ -47,13 +54,13 @@ for line in \
   echo "$line" >> "$KCONFIG"
 done
 
-# Stack WiFi/BT interno MediaTek (begonia-conn-wifi). Opt-in con MTK_GEN4M=1.
+# Stack WiFi/BT interno MediaTek (begonia-conn-wifi). Opt-in con MTK_GEN4M=true.
 #
 # Por defecto OFF: wlan_gen4m.ko llama a wireless_send_event(), que solo se
 # compila con CONFIG_WEXT_CORE. Sin esa opcion modpost aborta el build con
 #     ERROR: modpost: "wireless_send_event" [.../wlan_gen4m.ko] undefined!
 # El wifi por dongle (rtl8xxxu/mt76) no depende de este stack.
-if [ "${MTK_GEN4M:-0}" = "1" ]; then
+if [ "$MTK_GEN4M_ON" = "1" ]; then
   echo "=== Enabling MTK connectivity stack (wlan interno) ==="
   for line in \
     "CONFIG_WEXT_CORE=y" \
@@ -75,7 +82,7 @@ else
     echo "ERROR: quedaron lineas del stack MTK en $KCONFIG" >&2
     exit 1
   fi
-  echo "    (reactivar con MTK_GEN4M=1; ver nota sobre wireless_send_event)"
+  echo "    (reactivar con MTK_GEN4M=true; ver nota sobre wireless_send_event)"
 fi
 
 # BTF (eBPF/CO-RE) desactivado explicitamente.
