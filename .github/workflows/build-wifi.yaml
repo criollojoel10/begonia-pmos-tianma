@@ -67,11 +67,19 @@ jobs:
           ln -sf $PWD/pmbootstrap/pmbootstrap.py $HOME/.local/bin/pmbootstrap
           echo $HOME/.local/bin >> $GITHUB_PATH
 
-      - name: Clone pmaports (main, no MR 8852)
+      - name: Clone pmaports (pinned, no MR 8852)
         run: |
           git config --global user.name "criollojoel10"
           git config --global user.email "98426429+criollojoel10@users.noreply.github.com"
-          git clone --depth=1 https://gitlab.postmarketos.org/postmarketOS/pmaports.git "$PMAPORTS_DIR"
+          # Pinned on purpose: el config del kernel es un source sin URL que
+          # pmbootstrap copia de este checkout, asi que si upstream lo cambia el
+          # sha512sums del APKBUILD deja de cuadrar y el build se rompe sin
+          # avisar. Bumpar PMAPORTS_REF es el unico sitio a tocar.
+          PMAPORTS_REF="e43b1c9324634a5e28f81ba93b86b030c9cebd6c"
+          git init -q "$PMAPORTS_DIR"
+          git -C "$PMAPORTS_DIR" remote add origin https://gitlab.postmarketos.org/postmarketOS/pmaports.git
+          git -C "$PMAPORTS_DIR" fetch -q --depth=1 origin "$PMAPORTS_REF"
+          git -C "$PMAPORTS_DIR" checkout -q FETCH_HEAD
           git -C "$PMAPORTS_DIR" log -1 --oneline
 
       - name: Apply overlays (kernel APKBUILD, firmware, device) for begonia-conn-wifi
@@ -227,13 +235,18 @@ jobs:
           find "$PMAPORTS_DIR" -type d -name "plasma-mobile" 2>/dev/null | head -5
 
           echo "=== Building plasma-mobile UI from pmaports (local compile) ==="
-          pmbootstrap "${FLAGS[@]}" build postmarketos-ui-plasma-mobile 2>&1
+          # Soft-fail a proposito: si plasma-mobile no compila, queremos caer a
+          # una imagen Phosh funcional en vez de perder el install y con ella la
+          # imagen entera (este step usa set -e).
+          pmbootstrap "${FLAGS[@]}" build postmarketos-ui-plasma-mobile 2>&1 \
+            || echo "::warning::postmarketos-ui-plasma-mobile no compilo; continuando con Phosh"
 
           echo "=== Building tinydm (needed for multi-UI support) ==="
           pmbootstrap "${FLAGS[@]}" build tinydm 2>&1 || true
 
           echo "=== Installing plasma-mobile into device rootfs ==="
-          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- apk add --no-interactive postmarketos-ui-plasma-mobile 2>&1
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- apk add --no-interactive postmarketos-ui-plasma-mobile 2>&1 \
+            || echo "::warning::no se pudo instalar plasma-mobile; la imagen quedara con Phosh"
 
           echo "=== Verifying installed UIs in rootfs ==="
           pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c 'apk info 2>/dev/null | grep -iE "phosh|plasma|kwin|plasma" | sort' 2>&1
