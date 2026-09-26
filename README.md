@@ -201,6 +201,21 @@ también se puede compilar como alternativa/dongle, pero no se cargó ninguno en
 - **`postmarketos-ui-plasma-mobile` es soft-fail a propósito.** El step que lo compila usa
   `set -e`, así que si el build de la UI falla se perdía el `install` posterior y con él la imagen
   entera. Ahora si no compila cae a una imagen Phosh funcional y avisa con `::warning::`.
+- **Meter `pahole` en makedepends enciende BTF y rompe el build.** El config de pmaports trae
+  `CONFIG_DEBUG_INFO_BTF=y`, pero ese símbolo depende de `CONFIG_PAHOLE_HAS_SPLIT_BTF`, que kconfig
+  deduce de si **`pahole` está instalado**. Al añadir `pahole` (que es lo que hace upstream desde el
+  MR !9035) se activa el build de los host-tools de BTF, y en este paquete `tools/bpf/resolve_btfids`
+  se compila con `$CC` (el compilador cruzado) en vez de con `$HOSTCC`, así que no encuentra las
+  cabeceras de arch y revienta a los ~4 min, antes incluso de compilar vmlinux:
+  ```
+  tools/include/linux/types.h:13:10: fatal error: asm/types.h: No such file or directory
+  make[5]: *** [tools/build/Makefile.build:86: .../exec-cmd.o] Error 1
+  ```
+  Es el tipo de fallo que se camufla: el run anterior (sin `pahole`) compiló el kernel
+  entero y en su log `resolve_btfids` aparece **0 veces**. Depender de "si pahole está o no" es
+  frágil, así que `enable_kernel_drivers.sh` borra las líneas `=y` heredadas y deja
+  `# CONFIG_DEBUG_INFO_BTF is not set`, con verificación que aborta si BTF sigue activo. BTF solo
+  lleva información de tipos para eBPF/CO-RE: no afecta a arranque, display, wifi, bt ni ethernet.
 - **No swapear solo el kernel** (6.16 → 7.1) sin regenerar el initramfs: los `.ko` del initramfs llevan `vermagic` de 6.16 y el kernel 7.1 no los carga → sin display/touch. Por eso se hace build completo con pmbootstrap.
 - **`flags=0` en vbmeta** → LK rechaza el boot (bootloop a fastboot). Usar `flags=2`.
 - **`kernel = tianma`** es obligatorio; con el default (`stable`) falla porque el device ya no depende directo del kernel (solo expone las subpackages `-kernel-csot`/`-kernel-tianma`).
