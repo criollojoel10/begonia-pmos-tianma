@@ -292,16 +292,21 @@ jobs:
             'find /usr/lib/modules -name "*.ko*" | sort' | tee /tmp/rootfs-mods.txt
 
           # --- Ruta por dongle (SIEMPRE): lo que tiene que funcionar por defecto ---
-          # Ethernet USB: asix, ax88179_178a, r8150, r8152, cdc_ether, cdc_eem,
-          #               cdc_ncm, dm9601, smsc95xx, sierra_net
-          # Wi-Fi USB:    rtl8xxxu (Realtek), mt76_usb, mt76x0u, mt76x2u, mt7921u
+          # OJO: los nombres de modulo NO coinciden con los del fichero fuente.
+          # Ethernet USB: asix, ax88179_178a, rtl8150 (rtl8150.c, no "r8150"),
+          #               r8152, cdc_ether, cdc_eem, cdc_ncm, dm9601, smsc95xx,
+          #               sierra_net
+          # Wi-Fi USB:    rtl8xxxu (Realtek 8002), rtw88_8812au / rtw88_8821au /
+          #               rtw88_8822bu (Realtek 88xx), mt76-usb (CON GUION, no
+          #               "mt76_usb"), mt76x0u, mt76x2u, mt7921u
           # BT USB:       btusb (CONFIG_BT_HCIBTUSB)
           # Serial USB:   pl2303, ftdi_sio, cp210x
           # Si falta alguno, el build se da por verde pero el dongle no funcionaria:
           # mejor fallar aqui que descubrirlo con el movil en la mano.
           missing=0
-          for m in asix ax88179_178a r8150 r8152 cdc_ether cdc_eem cdc_ncm dm9601 \
-                   smsc95xx sierra_net rtl8xxxu mt76_usb mt76x0u mt76x2u mt7921u \
+          for m in asix ax88179_178a rtl8150 r8152 cdc_ether cdc_eem cdc_ncm \
+                   dm9601 smsc95xx sierra_net rtl8xxxu rtw88_8812au rtw88_8821au \
+                   rtw88_8822bu mt76-usb mt76x0u mt76x2u mt7921u \
                    btusb pl2303 ftdi_sio cp210x; do
             if grep -q "/${m}\.ko" /tmp/rootfs-mods.txt; then
               echo "OK dongle ${m}.ko"

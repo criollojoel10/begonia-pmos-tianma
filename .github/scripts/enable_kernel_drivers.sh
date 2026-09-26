@@ -29,17 +29,26 @@ for line in \
   "CONFIG_USB_NET_SMSC95XX=m" \
   "CONFIG_USB_NET_SR9700=m" \
   "CONFIG_USB_NET_SR9800=m" \
+  "CONFIG_USB_SIERRA_NET=m" \
   "" \
-  "# Wi-Fi Realtek (cubre TP-Link W821N: RTL8188EU / RTL8192EU)" \
+  "# Wi-Fi Realtek 8002 (cubre TP-Link W821N: RTL8188EU / RTL8192EU)" \
   "CONFIG_WLAN_VENDOR_REALTEK=y" \
   "CONFIG_RTL8XXXU=m" \
   "" \
-  "# Wi-Fi MediaTek" \
+  "# Wi-Fi Realtek 88xx por USB (8812AU / 8821AU / 8822BU: los dongles AC)" \
+  "CONFIG_RTW88_CORE=m" \
+  "CONFIG_RTW88_USB=m" \
+  "CONFIG_RTW88_8812AU=m" \
+  "CONFIG_RTW88_8821AU=m" \
+  "CONFIG_RTW88_8822BU=m" \
+  "" \
+  "# Wi-Fi MediaTek (OJO: kconfig distingue mayusculas; el simbolo es MT76x0U," \
+  "# con 'x' minuscula, y el que activa MT76_USB es MT76_CORE, no MT76)" \
   "CONFIG_WLAN_VENDOR_MEDIATEK=y" \
-  "CONFIG_MT76=m" \
+  "CONFIG_MT76_CORE=m" \
   "CONFIG_MT76_USB=m" \
-  "CONFIG_MT76X0U=m" \
-  "CONFIG_MT76X2U=m" \
+  "CONFIG_MT76x0U=m" \
+  "CONFIG_MT76x2U=m" \
   "CONFIG_MT7921U=m" \
   "" \
   "# USB-to-Serial adapters" \
