@@ -24,7 +24,7 @@ on:
           - "false"
           - "true"
       mtk_gen4m:
-        description: 'Stack WiFi/BT interno MediaTek (gen4m). OFF = wifi por dongle (recomendado: build fiable)'
+        description: 'Stack WiFi/BT interno MediaTek (gen4m). OFF = wifi por dongle. ON = wlan0 + BT del propio MT6785'
         required: false
         default: "false"
         type: choice
@@ -242,6 +242,41 @@ jobs:
           else
             printf '147147\n147147\n' | pmbootstrap "${PMB_FLAGS[@]}" install
           fi
+
+      - name: Verify MTK connectivity modules in rootfs (opt-in)
+        env:
+          MTK_GEN4M: ${{ inputs.mtk_gen4m }}
+        run: |
+          set -euo pipefail
+          CROSS="${{ github.event.inputs.cross }}"
+          FLAGS=(-c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 --details-to-stdout)
+          if [ "$CROSS" = "false" ]; then
+            FLAGS+=(--no-cross)
+          fi
+
+          echo "=== Modulos de conectividad MediaTek instalados en el rootfs ==="
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c \
+            'find /usr/lib/modules -path "*mediatek*" -name "*.ko" | sort' | tee /tmp/conn-mods.txt
+
+          if [ "${MTK_GEN4M:-0}" != "1" ]; then
+            echo "mtk_gen4m!=1: no se exige nada (el wifi vendra por dongle)"
+            exit 0
+          fi
+
+          # Con mtk_gen4m=1 el kernel tiene que haber compilado los tres modulos
+          # del forward-port (drivers/misc/mediatek/{connectivity,btif}).
+          # Si faltara alguno el build saldria verde y el wifi/BT no existirian:
+          # mejor fallar aqui que descubrirlo con el movil en la mano.
+          missing=0
+          for m in wmt_drv wlan_gen4m mtk-vendor-btif; do
+            if grep -q "/${m}\.ko" /tmp/conn-mods.txt; then
+              echo "OK ${m}.ko"
+            else
+              echo "::error::el kernel no trae ${m}.ko (mtk_gen4m=1)"
+              missing=1
+            fi
+          done
+          exit "$missing"
 
       - name: Build & Add Plasma Mobile UI
         run: |

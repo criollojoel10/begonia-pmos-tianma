@@ -171,11 +171,53 @@ que NO está en el kernel 6.16.4 mainline. Verificado en el dispositivo real:
 - Sin firmware en `/lib/firmware/mediatek/`.
 - Único rfkill presente: `nfc0` (NFC, no WiFi/BT).
 
-Conclusión: **no se puede activar WiFi en este kernel**. Para el WiFi hace falta un rebuild
-con la rama `begonia-conn-wifi` del fork `mt6785-mainline/linux` (forward-port del stack
-vendor a 6.16: `drivers/misc/mediatek/btif`, `srh_patch`, DTS con nodo WiFi) más el blob de
-conectividad del fork `mt6785-mainline/firmware`. El driver wireless USB (`mt76`, `rtl8xxxu`)
-también se puede compilar como alternativa/dongle, pero no se cargó ninguno en 6.16.4.
+Conclusión: **con este kernel tal cual (sin `mtk_gen4m`) no hay WiFi**, porque el
+forward-port del stack vendor existe en el árbol pero está `default n` en Kconfig. Ver abajo.
+
+## El stack de conectividad está en el MISMO commit que ya compilamos
+
+Dato que cambia las cuentas: la rama **`begonia-conn-wifi`** de `minorum/linux` apunta a
+`3a1ea7694219eb2fd513f0e630f2a882eab5c86f`, que es exactamente el `_tag` que buildea nuestro
+APKBUILD. O sea que **no hace falta ni otro kernel ni el MR !8852 (7.1)** para tener
+touch + WiFi + BT:
+
+| Módulo | Origen en el árbol | Qué es |
+|---|---|---|
+| `wmt_drv.ko` | `drivers/misc/mediatek/connectivity/common/` | WMT/STP/connsys bring-up (stage-1), crea `/dev/wmtdetect` y hace el handshake del conn-MCU |
+| `wlan_gen4m.ko` | `drivers/misc/mediatek/connectivity/wlan/gen4m/` | WLAN fullmac cfg80211 (stage-2), registra `wlan0`; 93 TU, subset CONNAC/AXI/6785 |
+| `mtk-vendor-btif.ko` | `drivers/misc/mediatek/btif/common/` | BTIF: lleva el tráfico de control WMT al conn-MCU |
+
+Kconfig: `MTK_WMT_FWPORT` (padre) → `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF`.
+Los cuatro están `default n`, y `enable_kernel_drivers.sh` los activa con `mtk_gen4m=1`
+(además de `CONFIG_WEXT_CORE=y`, que `wlan_gen4m.ko` necesita por `wireless_send_event`).
+
+El DTS de 6.16.4 de la rama ya trae lo necesario: nodo `connectivity-combo`
+(`GIC_SPI 321` = BGF_EINT) y las reservas de memoria `consys@ab000000` (4 MB) y
+`wifi-reserve-memory`.
+
+### Por qué el touch Tianma no obliga al kernel 7.1
+
+El MR !8852 (kernel 7.1 + split CSOT/Tianma) resuelve el panel, pero en 6.16.4 el touch Tianma ya
+funciona con el swap de firmware de la sección de arriba (`nt36672a_begonia_tianma.bin` copiado
+con el nombre que espera el DTB). Con 6.16.4 + `mtk_gen4m=1` se tienen touch, WiFi y BT a la vez.
+
+### Lo que puede fallar (leído en el propio código, no hay tests)
+
+1. El Kconfig se describe a sí mismo como *"work-in-progress bring-up vehicle, not an
+   upstreamable driver"*.
+2. En el DTS, el `WIFI_EINT` del nodo `connectivity-combo` es un **placeholder**
+   (`GIC_SPI 78`, sin sourcear del DT de stock) y los pines `gpio_combo_*` se omiten
+   (`DEFAULT_PIN_ID`). Si el IRQ no es el real, el WLAN no llega a dar señal.
+3. `wmt_drv` trae `wmt_wifi_trigger.o` (*"/dev/wmtWifi WiFi on/off trigger"*), o sea que
+   puede hacer falta un trigger de userspace para encender la radio.
+4. El transporte STP vivo es BTIF (`stp_uart`/`stp_sdio` están eliminados a propósito: *"dead on
+   this SoC"*), así que el puente BTIF↔BlueZ es la parte que no está en el árbol. El kernel trae
+   además una reimplementación (`CONFIG_MTK_BTIF` → `mtk-btif.ko`) con el mismo compatible
+   `mediatek,btif`: solo una de las dos puede hacer de puente HCI.
+
+Por eso el workflow tiene un check de **señal positiva** (*Verify MTK connectivity modules in
+rootfs*): con `mtk_gen4m=1` exige los tres `.ko` en `/usr/lib/modules/**/mediatek/`, para que
+un kernel que se compiló sin ellos no pase por verde.
 
 ## Errores que no hay que repetir
 
