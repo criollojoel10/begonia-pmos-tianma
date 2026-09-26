@@ -1,0 +1,57 @@
+maintainer="Dinolek <git@dinolek.me>"
+pkgname=firmware-xiaomi-begonia
+pkgver=20260617
+pkgrel=0
+pkgdesc="Firmware for Xiaomi Redmi Note 8 Pro"
+subpackages="
+	$pkgname-touchscreen
+	$pkgname-connectivity
+"
+url="https://gitlab.postmarketos.org/mt6785-mainline/firmware"
+arch="aarch64"
+license="proprietary"
+options="!check !strip !archcheck !tracedeps pmb:cross-native"
+_commit="33aa9fe1db0079945fa272e42f04db732489319d"
+source="
+	https://gitlab.postmarketos.org/mt6785-mainline/firmware/-/archive/$_commit/firmware-$_commit.tar.gz
+	10-touch-firmware.files
+"
+builddir="$srcdir/firmware-$_commit"
+
+package() {
+	# parent package is empty
+	mkdir -p "$pkgdir"
+}
+
+touchscreen() {
+	pkgdesc="Xiaomi Redmi Note 8 Pro touchscreen firmware"
+
+	install -Dm644 "$builddir/novatek/nt36672a_begonia_csot.bin.zst" -t \
+		"$subpkgdir/lib/firmware/novatek/"
+	install -Dm644 "$srcdir/10-touch-firmware.files" -t \
+		"$subpkgdir/usr/share/mkinitfs/files/"
+}
+
+connectivity() {
+	pkgdesc="Xiaomi Redmi Note 8 Pro WiFi/Bluetooth connectivity firmware"
+
+	install -Dm644 "$builddir/mediatek/WIFI_RAM_CODE_soc1_0_2a_1.bin.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/WMT_SOC.cfg.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/soc1_0_patch_mcu_2a_1_hdr.bin.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/soc1_0_ram_bt_2a_1_hdr.bin.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/soc1_0_ram_mcu_2a_1_hdr.bin.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/soc1_0_ram_wifi_2a_1_hdr.bin.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+	install -Dm644 "$builddir/mediatek/wifi.cfg.zst" -t \
+		"$subpkgdir/lib/firmware/mediatek/"
+}
+
+sha512sums="
+88be19d00b39d7724b1b75c66b3c648c854f9d2e9ecac39c389345e53c7c957069a365e9f0c7731cfb3c03de1d052ab6dc63331ea51d957591a8922f332e9ffb  firmware-33aa9fe1db0079945fa272e42f04db732489319d.tar.gz
+a8373ff6265c21be1aef1b5ccd0a0b419887864e5609b99ef0af96cdb0079c3a099fbbd6242fc3e95f89bb5b096119bd3e3ef232741700cf05b33a079d6aba1f  10-touch-firmware.files
+"

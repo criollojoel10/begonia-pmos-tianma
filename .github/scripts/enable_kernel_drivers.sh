@@ -38,7 +38,17 @@ for line in \
   "# USB-to-Serial adapters" \
   "CONFIG_USB_SERIAL_PL2303=m" \
   "CONFIG_USB_SERIAL_FTDI_SIO=m" \
-  "CONFIG_USB_SERIAL_CP210X=m"; do
+  "CONFIG_USB_SERIAL_CP210X=m" \
+  "" \
+  "# Bluetooth USB (Realtek RTL8821C, CSR dongles)" \
+  "CONFIG_BT_LE=y" \
+  "CONFIG_BT_HCIBTUSB=m" \
+  "" \
+  "# MTK connectivity stack (begonia-conn-wifi): WMT + gen4m WLAN + BTIF" \
+  "CONFIG_MTK_WMT_FWPORT=m" \
+  "CONFIG_MTK_WMT_DRV=m" \
+  "CONFIG_MTK_WLAN_GEN4M=m" \
+  "CONFIG_MTK_WMT_FWPORT_BTIF=m"; do
   echo "$line" >> "$KCONFIG"
 done
 

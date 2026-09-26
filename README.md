@@ -94,6 +94,27 @@ Resultado confirmado: táctil Tianma con ejes correctos en pmOS 6.16.4, sin comp
    - `cross`: `true` (compilación cruzada, recomendado; `false` = build nativo emulado con qemu, mucho más lento).
 2. Al terminar, descargar el artefacto `pmos-begonia-tianma-7.1-cross-true`.
 
+## Build WiFi/Bluetooth (kernel 6.16.4 begonia-conn-wifi)
+
+Para el WiFi/BT integrado del SoC y los dongles USB se usa **`build-wifi.yaml`**, que construye
+el kernel de la rama `begonia-conn-wifi` del fork `mirror/linux` (`3a1ea769`, v6.16.4) en lugar
+del 7.1/MR !8852:
+
+- Aplica overlays en `pmaports` (sin parches `git am`, para no depender de commits móviles):
+  - `linux-postmarketos-mediatek-mt6785/APKBUILD` → kernel `minorum/linux` @ `3a1ea769` (build gcc).
+  - `firmware-xiaomi-begonia/APKBUILD` → commit `33aa9fe1` con subpaquete nuevo
+    `firmware-xiaomi-begonia-connectivity` (7 blobs MTK en `/lib/firmware/mediatek/`).
+  - `device-xiaomi-begonia/` → depende de `firmware-xiaomi-begonia-connectivity` y lleva
+    `deviceinfo_flash_fastboot_partition_vbmeta="vbmeta"`.
+- `.github/scripts/enable_kernel_drivers.sh` activa en el config del kernel:
+  - Ethernet USB: `USB_NET_AX8817X/AX88179_178A/RTL8150/RTL8152/CDCETHER/CDC_NCM/DM9601/SMSC95XX/SR9700/SR9800`.
+  - WiFi USB Realtek: `RTL8XXXU` (TP-Link TL-WN821N) y MediaTek: `MT76`/`MT76_USB`/`MT7921U`.
+  - Bluetooth USB: `BT_LE=y`, `BT_HCIBTUSB` (RTL8821C, CSR).
+  - Stack MTK integrado: `MTK_WMT_FWPORT`, `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF`.
+- Artefacto resultante: `pmos-begonia-wifi-6.16.4-cross-true`.
+
+Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
+
 ## Flasheo (fastboot)
 
 ```

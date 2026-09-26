@@ -1,0 +1,65 @@
+# Kernel config based on: arch/arm64/configs/defconfig
+maintainer="Dinolek <git@dinolek.me>"
+_flavor="postmarketos-mediatek-mt6785"
+pkgname=linux-$_flavor
+pkgver=6.16.4
+pkgrel=1
+pkgdesc="Mainline kernel fork for MT6785"
+arch="aarch64"
+_carch="arm64"
+
+url="https://gitlab.postmarketos.org/minorum/linux"
+license="GPL-2.0-only"
+options="!strip !check !tracedeps
+	pmb:cross-native
+	pmb:kconfigcheck-community
+"
+makedepends="
+	bash
+	bison
+	findutils
+	flex
+	openssl-dev
+	perl
+	postmarketos-installkernel
+"
+
+# Source: begonia-conn-wifi forward-port (minorum/linux @ 3a1ea769, v6.16.4)
+_tag="3a1ea7694219eb2fd513f0e630f2a882eab5c86f"
+_config="config-$_flavor.$arch"
+source="
+	https://gitlab.postmarketos.org/minorum/linux/-/archive/$_tag/linux-3a1ea769.tar.gz
+	$_config
+"
+builddir="$srcdir/linux-$_tag"
+
+prepare() {
+	default_prepare
+	cp "$srcdir/config-$_flavor.$arch" .config
+}
+
+build() {
+	unset LDFLAGS
+	make ARCH="$_carch" CC="${CC:-gcc}" \
+		KBUILD_BUILD_VERSION="$((pkgrel + 1))-$_flavor"
+}
+
+package() {
+	mkdir -p "$pkgdir"/boot
+
+	make zinstall modules_install dtbs_install \
+		ARCH="$_carch" \
+		INSTALL_PATH="$pkgdir"/boot/ \
+		INSTALL_MOD_PATH="$pkgdir" \
+		INSTALL_MOD_STRIP=1 \
+		INSTALL_DTBS_PATH="$pkgdir/boot/dtbs"
+	rm -f "$pkgdir"/lib/modules/*/build "$pkgdir"/lib/modules/*/source
+
+	install -D "$builddir"/include/config/kernel.release \
+		"$pkgdir"/usr/share/kernel/$_flavor/kernel.release
+}
+
+sha512sums="
+47ae3ae3d879fb1929ca5e74977688f9933c162324fab12f493a9f0fd813d7437eb8427fb4865b6513daca747b69874a5aa8d298989fc6409606399865e9a4fd  linux-3a1ea769.tar.gz
+c14ea5e1fd73839e39737a810500a6efaa140999316bebc3a96f93f0800844cdbd0aca1cb336ccc1e1f1b149fd1f1382e28f9a39d9a45a3a3b96c1f5f00a3f83  config-postmarketos-mediatek-mt6785.aarch64
+"
