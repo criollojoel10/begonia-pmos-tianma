@@ -78,5 +78,32 @@ else
   echo "    (reactivar con MTK_GEN4M=1; ver nota sobre wireless_send_event)"
 fi
 
+# BTF (eBPF/CO-RE) desactivado explicitamente.
+#
+# El config de pmaports trae CONFIG_DEBUG_INFO_BTF=y, pero ese simbolo depende
+# de CONFIG_PAHOLE_HAS_SPLIT_BTF, que kconfig deduce de si `pahole` esta
+# instalado. Al meter pahole en makedepends (como hace upstream desde el MR
+# !9035) se activa el build de tools/bpf/resolve_btfids, y en este paquete esos
+# host-tools se compilan con $CC (el compilador cruzado) en vez de $HOSTCC, asi
+# que reventan:
+#     tools/include/linux/types.h:13:10: fatal error: asm/types.h: No such file
+#     make[5]: *** [tools/build/Makefile.build:86: .../exec-cmd.o] Error 1
+# No afecta a arranque, display, wifi, bt ni ethernet; solo quita la
+# informacion de tipos para eBPF.
+echo "=== Disabling BTF (eBPF) explicitly ==="
+# Se borran las asignaciones=y heredadas de pmaports (si no, kconfig toma la
+# ultima, pero grep/inspeccion seguirian viendo un BTF=y) y se vuelve a dejar
+# el simbolo como "not set", que es lo que gana al final del fichero.
+sed -i -E '/^CONFIG_DEBUG_INFO_BTF(_MODULES)?=/d' "$KCONFIG"
+cat >> "$KCONFIG" <<'EOF'
+# CONFIG_DEBUG_INFO_BTF is not set
+# CONFIG_DEBUG_INFO_BTF_MODULES is not set
+EOF
+
 echo "=== Verification ==="
 grep -E '^(CONFIG_USB_NET|CONFIG_USB_RTL|CONFIG_RTL8|CONFIG_WLAN_VENDOR|CONFIG_MT76|CONFIG_MT792|CONFIG_USB_SERIAL_PL2303|CONFIG_USB_SERIAL_FTDI|CONFIG_USB_SERIAL_CP210)' "$KCONFIG"
+if grep -qE '^CONFIG_DEBUG_INFO_BTF' "$KCONFIG"; then
+  echo "ERROR: BTF sigue habilitado en $KCONFIG" >&2
+  exit 1
+fi
+echo "    BTF off OK"
