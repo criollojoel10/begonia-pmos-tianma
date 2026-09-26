@@ -184,7 +184,11 @@ jobs:
           find "$PMB_WORK/packages" -name "${KERNEL_PKG}*.apk" -delete 2>/dev/null || true
 
           echo "=== Building kernel package (force) ==="
-          pmbootstrap -c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 -j 2 --details-to-stdout build "$KERNEL_PKG" --force 2>&1
+          # --lax: pmbootstrap borra y recrea chroot_native y chroot_buildroot* en
+          # cada "build" (strict por defecto), y el paso de "checksum" de arriba ya
+          # dejo el buildroot con los makedepends instalados. Saltarnos el zap
+          # ahorra ~3 min de reconstruccion y hace el build determinista.
+          pmbootstrap -c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 -j 2 --details-to-stdout build --lax "$KERNEL_PKG" --force 2>&1
 
           echo "=== Newly built kernel packages ==="
           find "$PMB_WORK/packages" -name "${KERNEL_PKG}*.apk" 2>/dev/null

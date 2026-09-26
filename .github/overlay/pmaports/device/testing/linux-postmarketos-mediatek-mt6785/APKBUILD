@@ -29,10 +29,12 @@ options="
 "
 makedepends="
 	bash
+	binutils
 	bison
 	elfutils-dev
 	findutils
 	flex
+	gcc
 	openssl-dev
 	pahole
 	perl
@@ -53,11 +55,26 @@ builddir="$srcdir/linux-$_tag"
 prepare() {
 	default_prepare
 	cp "$srcdir/config-$_flavor.$arch" .config
+
+	# Preflight del toolchain. En un build anterior el kernel murio en
+	# scripts/as-version.sh con "cc: unknown assembler invoked": el CC por
+	# defecto del kernel es "cc" y, aunque "command -v cc" encontraba algo,
+	# "cc -Wa,--version -c -x assembler-with-cpp" no devolvia "GNU assembler"
+	# (ensamblador no ejecutable; su error va a stderr y as-version.sh lo
+	# manda a /dev/null). Abajo fijamos CC=gcc, pero sin esto no hay forma de
+	# saber por que fallo si vuelve a pasar.
+	echo "== toolchain en el buildroot =="
+	command -v cc gcc as || true
+	cc --version 2>&1 | head -1
+	cc -Wa,--version -c -x assembler-with-cpp /dev/null -o /dev/null 2>&1 | head -1
 }
 
 build() {
 	unset LDFLAGS
-	make ARCH="$_carch" CC="${CC:-gcc}" \
+	# CC/HOSTCC explicitos: el default del kernel es "cc" y Kconfig.include lo
+	# pasa a scripts/as-version.sh, que aborta el build entero si no puede
+	# ejecutar el ensamblador. Con "gcc" nos saltamos el symlink "cc".
+	make ARCH="$_carch" CC=gcc HOSTCC=gcc \
 		KBUILD_BUILD_VERSION="$((pkgrel + 1))-$_flavor"
 }
 
@@ -66,6 +83,7 @@ package() {
 
 	make dtbs_install modules_install zinstall \
 		ARCH="$_carch" \
+		CC=gcc HOSTCC=gcc \
 		INSTALL_PATH="$pkgdir"/boot/ \
 		INSTALL_MOD_PATH="$pkgdir"/usr \
 		INSTALL_MOD_STRIP=1 \
