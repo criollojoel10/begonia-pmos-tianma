@@ -79,6 +79,24 @@ Resultado confirmado: táctil Tianma con ejes correctos en pmOS 6.16.4, sin comp
 
 (El `.config` 7.1 del MR ya trae la mayoría; el script añade los que faltan.)
 
+### Dos trampas al añadir drivers, y cómo se pagan
+
+El run `36262126701` construyó los tres módulos del stack MTK correctamente y falló después, en el
+step de verify, por cinco dongles. Las dos causas fueron de nombres, no de código:
+
+1. **Kconfig es *case-sensitive* y `olddefconfig` descarta en silencio lo que no reconoce.** No hay
+   ningún aviso: el símbolo simplemente no existe en el `.config`. `CONFIG_MT76` no existe (es
+   `MT76_CORE`, y `MT76_USB` depende de él, así que se caía en cascada), `MT76X0U`/`MT76X2U` llevan la
+   `x` minúscula (`MT76x0U`, `MT76x2U`) y `USB_SIERRA_NET` faltaba. Peor: `USB_RTL8150` **sí** existe
+   como símbolo Kconfig, pero no compila ningún driver (el Makefile produce `rtl8150.ko` y no hay
+   `r8150.c`), así que un símbolo "válido" no garantiza un módulo.
+2. **El nombre del módulo no tiene por qué parecerse al del símbolo.** De las líneas `LD [M]` del log
+   salen los nombres reales: el driver `USB_RTL8150` produce **`rtl8150.ko`**, y el transporte común de
+   mt76 es **`mt76-usb.ko`** (con guion). Los `rtw88_*` llevan su variante dentro: `rtw88_8812au.ko`,
+   `rtw88_8821au.ko`, `rtw88_8822bu.ko`.
+
+Por eso el verify lista los `.ko` por su nombre real y no por el símbolo del Kconfig.
+
 ## Caché / buenas prácticas
 
 - **apk + distfiles** (`cache_apk_*`, `cache_distfiles`): evita re-descargar paquetes Alpine y el tarball del kernel (~200 MB) entre runs.
@@ -108,7 +126,8 @@ del 7.1/MR !8852:
     `deviceinfo_flash_fastboot_partition_vbmeta="vbmeta"`.
 - `.github/scripts/enable_kernel_drivers.sh` activa en el config del kernel:
   - Ethernet USB: `USB_NET_AX8817X/AX88179_178A/RTL8150/RTL8152/CDCETHER/CDC_NCM/DM9601/SMSC95XX/SR9700/SR9800`.
-  - WiFi USB Realtek: `RTL8XXXU` (TP-Link TL-WN821N) y MediaTek: `MT76`/`MT76_USB`/`MT7921U`.
+  - WiFi USB Realtek: `RTL8XXXU` (TP-Link TL-WN821N) y MediaTek: `MT76_CORE`/`MT76_USB`/`MT76x0U`/`MT76x2U`/`MT7921U`, más los `RTW88_*` de los dongles AC de 20-30 € (`RTW88_CORE`, `RTW88_USB`, `RTW88_8812AU`, `RTW88_8821AU`, `RTW88_8822BU`).
+  - Ethernet USB: también `USB_SIERRA_NET`.
   - Bluetooth USB: `BT_LE=y`, `BT_HCIBTUSB` (RTL8821C, CSR).
   - Stack MTK integrado: **opt-in** vía el input `mtk_gen4m` del workflow (env `MTK_GEN4M`, por
     defecto `0` = desactivado). Ver abajo por qué.
@@ -140,12 +159,61 @@ la línea del `.config`, y entonces `modpost` aborta el kernel entero con
 `WEXT_PROC`), que es justo lo que compila `net/wireless/wext-core.o` → `wireless_core.ko`.
 
 Con `mtk_gen4m=false` el kernel compila y quedan los drivers de dongle. Con `true`, el kernel llega
-hasta `modules_install` **verificado** (run `36260038275` compiló el stack entero y solo falló en
-`modpost` por el símbolo anterior, ya corregido). Lo que **no** está verificado es que el wifi interno
-funcione en el dispositivo: el propio Kconfig del fork lo llama *"work-in-progress bring-up vehicle"*,
-el DTS trae el `WIFI_EINT` como *placeholder* (`GIC_SPI 78`, no sourceado del DT de fábrica) y los
-pines `gpio_combo_*` están omitidos, así que es razonable que el wlan no llegue a levantar. El driver
-tampoco se autoprobea: hay que hacer `modprobe` y usar el trigger `/dev/wmtWifi`.
+hasta `modules_install` **verificado**: el run `36262126701` confirmó los tres módulos del stack
+(`wmt_drv.ko`, `wlan_gen4m.ko`, `mtk-vendor-btif.ko`); el run falló después, solo en el verify, por
+nombres de módulo mal escritos en la lista de dongles (fix `d664db9`, ver más abajo).
+
+Lo que **no** está verificado es que el wifi interno funcione en el dispositivo. El kernel del fork se
+describe a sí mismo como *"work-in-progress bring-up vehicle"* y el propio autor del trigger pone
+`RUNTIME-UNPROVEN: compile/link verified only`.
+
+### El DTS del fork sí está completo
+
+La parte de device tree ya no es un obstáculo: `mt6785.dtsi` del fork trae `wifi@18000000`
+(`compatible = "mediatek,wifi"`), `consys@18002000` (`mediatek,mt6785-consys`, con los 12 `reg` en el
+orden que espera `consys_read_reg_from_dts`) y `btif@1100c000` (`mediatek,btif`), más
+`mt6785-xiaomi-begonia.dts` con `consys_reserved` (4 MB no-map) y `wifi_mem` (3 MB
+`shared-dma-pool`). `mtk_wcn_consys_hw.c` sí tiene `mediatek,mt6785-consys` en su tabla de compatibles.
+Lo que sí queda como *placeholder* es el `WIFI_EINT` (`GIC_SPI 78`, el IRQ de wake del wifi que el
+bootloader de fábrica sourcea), y los pines `gpio_combo_*` están omitidos. El `wmac@18000000` de
+routers está `status = "disabled"` a propósito, para no chocar con el stack de fabricante.
+
+El driver **no se autoprobea**: los `platform_device` existen desde `of_platform_populate`, pero hay que
+cargar los módulos en orden y usar el trigger:
+
+```sh
+# .github/scripts/mtk-wifi-test.sh hace todo esto y da un veredicto
+modprobe mtk-vendor-btif        # transporte de control hacia el conn-MCU
+modprobe wmt_drv                # crea /dev/wmtWifi
+modprobe wlan_gen4m             # registra el probe de gen4m
+printf 1 > /dev/wmtWifi         # wmt_dev_set_hif_btif() + mtk_wcn_wmt_func_on(WIFI)
+```
+
+### Firmware que pide (ya está en la imagen)
+
+`firmware-xiaomi-begonia-connectivity` los instala en `/lib/firmware/mediatek/`, y el kernel tiene
+`CONFIG_FW_LOADER_COMPRESS_ZSTD=y` así que los `.zst` los descomprime él:
+
+| Fichero | Lo pide |
+|---|---|
+| `WMT_SOC.cfg` | `wmt_conf.h` (con fallback `WMT.cfg`) |
+| `WMT_STEP.cfg` | `wmt_step.h` (opcional) |
+| `soc1_0_patch_mcu_2a_1_hdr.bin` | `wmt_dev.c:459` |
+| `soc1_0_ram_mcu_2a_1_hdr.bin`, `soc1_0_ram_wifi_2a_1_hdr.bin`, `soc1_0_ram_bt_2a_1_hdr.bin` | `wmt_ctrl.c:654-656` |
+| `WIFI_RAM_CODE_soc1_0_2a_1.bin` | `gl_kal.c` → `connacConstructFirmwarePrio()`; el `2a` sale de `CFG_WIFI_IP_SET(2)` + `kalGetFwFlavor()` en `plat/mt6785/plat_priv.c:122`, que devuelve `'a'` |
+| `wifi.cfg` | `gl_init.c:3322` (opcional: si falta, prueba rutas Android y sigue) |
+
+No hace falta EEPROM de calibración: el driver lo pide como `CFG_EEPRM_FILENAME_MT%x.bin`, y si el
+fichero no está cae al **modo eFuse** (`ucSourceMode = 0`), que es lo normal en un móvil.
+
+### Por qué el Bluetooth interno no se puede
+
+`mtk-vendor-btif.ko` (controlado por `MTK_WMT_FWPORT_BTIF`) es solo el transporte de control del WMT
+hacia el conn-MCU: **no registra ningún HCI** (no hay `hci_register_dev` en
+`drivers/misc/mediatek/btif/`), así que BlueZ no lo puede usar. El único driver HCI de MediaTek del
+árbol, `drivers/bluetooth/btmtkuart.c`, es para routers con UART (`mt7622`, `mt7663u`, `mt7668u`) y
+begonia no expone el BT del MCU por UART. Haría falta un driver HCI nuevo sobre BTIF o el userspace
+vendor `mtk_bt_stack`, que no está disponible. El BT usable es el de un **dongle USB** (`btusb`).
 
 Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
 
