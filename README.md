@@ -110,8 +110,31 @@ del 7.1/MR !8852:
   - Ethernet USB: `USB_NET_AX8817X/AX88179_178A/RTL8150/RTL8152/CDCETHER/CDC_NCM/DM9601/SMSC95XX/SR9700/SR9800`.
   - WiFi USB Realtek: `RTL8XXXU` (TP-Link TL-WN821N) y MediaTek: `MT76`/`MT76_USB`/`MT7921U`.
   - Bluetooth USB: `BT_LE=y`, `BT_HCIBTUSB` (RTL8821C, CSR).
-  - Stack MTK integrado: `MTK_WMT_FWPORT`, `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF`.
+  - Stack MTK integrado: **opt-in** vía el input `mtk_gen4m` del workflow (env `MTK_GEN4M`, por
+    defecto `0` = desactivado). Ver abajo por qué.
 - Artefacto resultante: `pmos-begonia-wifi-6.16.4-cross-true`.
+
+### `mtk_gen4m`: por qué está desactivado por defecto
+
+`wlan_gen4m.ko` (el stack wifi propietario de MediaTek) llama a `wireless_send_event()`, que solo
+se compila con `CONFIG_WEXT_CORE`. Sin esa opción, modpost aborta el kernel entero:
+
+```
+ERROR: modpost: "wireless_send_event" [.../wireless_core.ko] undefined!
+```
+
+Es un fallo de build, no de runtime: no hay forma de degradar gracefully, el kernel no compila. Por eso
+el input existe en vez de estar siempre activo:
+
+| `mtk_gen4m` | Qué pasa |
+|---|---|
+| `false` (por defecto) | Stack MTK fuera. El kernel compila. Los dongles USB (`rtl8xxxu`, `mt76`) no lo necesitan. |
+| `true` | Añade `MTK_WMT_FWPORT`, `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF` **y `CONFIG_WEXT_CORE=y`**, que es lo que resuelve el símbolo. |
+
+Ambos caminos se compilaron y llegaron hasta `modules_install` sin errores de modpost, así que el
+stack es viable; lo que no está verificado es que el wifi interno funcione en el dispositivo, porque
+falta probarlo en hardware. Por eso el run por defecto es el de los dongles: es el que desbloquea
+usar el hub ahora mismo.
 
 Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
 
@@ -156,6 +179,28 @@ también se puede compilar como alternativa/dongle, pero no se cargó ninguno en
 
 ## Errores que no hay que repetir
 
+- **`zstd` ausente en makedepends rompe el kernel.** El config de pmaports trae
+  `CONFIG_MODULE_COMPRESS_ZSTD=y` + `MODULE_COMPRESS_ALL=y`, así que `modules_install` invoca el
+  binario `zstd` y sin él falla con
+  `make[2]: *** [scripts/Makefile.modinst:162: .../sha512-ce.ko.zst] Error 127` /
+  `/bin/sh: line 0: zstd: not found`. Lo arregló upstream en el **MR !9035** (`bb84c79b7`, "build with
+  LLVM"), que además movió `INSTALL_MOD_PATH` a `"$pkgdir"/usr`. Nuestro overlay estaba basado en la
+  versión **pre-!9035**; ya está rebasado. El error es engañoso porque el config de una copia local
+  vieja de pmaports lo tenía desactivado y no lo reproducía: **el config que se usa es el del
+  checkout de pmaports, no el de tu copia local**.
+- **`INSTALL_MOD_PATH="$pkgdir"` deja los módulos en `/lib/modules`**; Alpine con `/usr` merge (y el
+  dispositivo vivo) los espera en `/usr/lib/modules`. Como upstream.
+- **Pinear pmaports por SHA rompe pmbootstrap.** `pmb/helpers/git.py` lee literalmente
+  `git show origin/main:channels.cfg`; un fetch por SHA deja HEAD detached y sin `origin/main`, y
+  aborta con `Failed to read channels.cfg from 'origin/main' branch`. Si se pina, hay que crear la
+  ref a mano con `git update-ref refs/remotes/origin/main FETCH_HEAD`.
+- **El config del kernel es un source sin URL**: pmbootstrap lo copia del checkout de pmaports, así
+  que el `sha512sums` del APKBUILD documenta pero no verifica, y `pmbootstrap checksum` lo
+  reescribe con el valor del config ya mutado por `enable_kernel_drivers.sh`. Por eso está pineado
+  el commit de pmaports: si upstream mueve el config, nadie se entera.
+- **`postmarketos-ui-plasma-mobile` es soft-fail a propósito.** El step que lo compila usa
+  `set -e`, así que si el build de la UI falla se perdía el `install` posterior y con él la imagen
+  entera. Ahora si no compila cae a una imagen Phosh funcional y avisa con `::warning::`.
 - **No swapear solo el kernel** (6.16 → 7.1) sin regenerar el initramfs: los `.ko` del initramfs llevan `vermagic` de 6.16 y el kernel 7.1 no los carga → sin display/touch. Por eso se hace build completo con pmbootstrap.
 - **`flags=0` en vbmeta** → LK rechaza el boot (bootloop a fastboot). Usar `flags=2`.
 - **`kernel = tianma`** es obligatorio; con el default (`stable`) falla porque el device ya no depende directo del kernel (solo expone las subpackages `-kernel-csot`/`-kernel-tianma`).
