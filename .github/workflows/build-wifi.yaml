@@ -16,13 +16,13 @@ on:
         required: true
         default: "4096"
       cross:
-        description: Cross compilation
+        description: Cross compilation (solo en runner x86_64; en ARM nativo va false)
         required: true
-        default: "true"
+        default: "false"
         type: choice
         options:
-          - "true"
           - "false"
+          - "true"
       mtk_gen4m:
         description: 'Stack WiFi/BT interno MediaTek (gen4m). OFF = wifi por dongle (recomendado: build fiable)'
         required: false
@@ -35,7 +35,17 @@ on:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-24.04
+    # Runner ARM64 nativo de GHA (gratis para repos publicos). Elegido por
+    # dos motivos, ambos verificados en el run 36243494864 (x86_64 + cross):
+    #   * Sin emulacion: con runner x86_64, cross=true mete TODO el buildroot
+    #     aarch64 detras de qemu-user, y ahi la compilacion de paquetes
+    #     aarch64 peta con
+    #       cc: fatal error: cannot execute 'cc1': posix_spawnp: ...
+    #     al final del "Install Phosh base system" (1 h 40 min de emulacion
+    #     paraupa por nada).
+    #   * Velocidad: el kernel tardaba 1 h 12 min emulado; nativo son minutos.
+    # cross=false es obligatorio aqui (no hay nada que cruzar en aarch64).
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
 
     env:
@@ -58,7 +68,13 @@ jobs:
       - name: Dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq git python3 python3-pip python3-venv python3-setuptools python3-wheel build-essential bison flex bc cpio zip unzip xz-utils zstd kmod file rsync android-sdk-platform-tools qemu-user-static binfmt-support ca-certificates openssl kpartx util-linux parted e2fsprogs dosfstools findutils coreutils
+          sudo apt-get install -y -qq git python3 python3-pip python3-venv python3-setuptools python3-wheel build-essential bison flex bc cpio zip unzip xz-utils zstd kmod file rsync android-sdk-platform-tools ca-certificates openssl kpartx util-linux parted e2fsprogs dosfstools findutils coreutils
+          # qemu-user/binfmt solo hacen falta si se compila cruzado desde x86_64
+          if [ "$(uname -m)" = "x86_64" ]; then
+            sudo apt-get install -y -qq qemu-user-static binfmt-support
+          else
+            echo "runner $(uname -m): sin qemu, se compila nativo"
+          fi
 
       - name: Clone pmbootstrap
         run: |
