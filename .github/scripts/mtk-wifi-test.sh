@@ -53,18 +53,23 @@ if [ -d "$FW" ]; then
 			bad "$f falta en $FW"
 		fi
 	done
-	# wifi.cfg y txpowerctrl.cfg no hacen falta, y no por un fallback:
-	# - wifi.cfg solo lo lee wlanGetParseConfig() (gl_init.c:3311), una rutina de
-	#   debug bajo CFG_SUPPORT_EASY_DEBUG que no tiene ninguna llamada en el fwport.
-	# - txpowerctrl.cfg lo carga txPwrCtrlLoadConfig() (rlm_domain.c:4683) despues
-	#   de rellenar la lista con la tabla compilada g_au1TxPwrDefaultSetting; si
-	#   falta, solo avisa con DBGLOG a nivel INFO.
-	# Se listan igual, para saber que estado tienen: el paquete los instala.
+	# wifi.cfg y txpowerctrl.cfg no hacen falta para que arranque el firmware, y
+	# no por un fallback: los dos se cargan con la tabla de fabrica YA COMPILADA
+	# puesta antes, y el fichero solo la sobreescribe si viene relleno.
+	#   - wlanGetConfig() (gl_init.c:3361), desde wlanOnPreAdapterStart con
+	#     CFG_SUPPORT_CFG_FILE=1, hace wlanCfgInit(prAdapter, NULL, 0, 0) y solo
+	#     vuelve a llamar wlanCfgInit con el buffer si pucConfigBuf[0] != 0.
+	#   - txPwrCtrlLoadConfig() (rlm_domain.c) mete la lista global compilada con
+	#     txPwrCtrlGlobalVariableToList() y luego intenta el cfg; si no esta, solo
+	#     escribe "no txpowerctrl.cfg or file is empty" a nivel INFO.
+	# Los dos proban ademas /data/misc/wifi/ y /storage/sdcard0/ por si acaso.
+	# Se listan aparte para saber si estan: nosotros los instalamos, asi que si
+	# se pierde alguno se pierde la calibracion de fabrica, no el arranque.
 	for f in wifi.cfg txpowerctrl.cfg; do
 		if [ -e "$FW/$f" ] || [ -e "$FW/$f.zst" ]; then
-			info "$f presente (opcional, el driver no lo necesita)"
+			ok "$f (opcional, pero se usara: es la calibracion de fabrica)"
 		else
-			info "$f ausente (normal: es opcional)"
+			info "$f ausente: el driver arranca igual con la tabla compilada"
 		fi
 	done
 else

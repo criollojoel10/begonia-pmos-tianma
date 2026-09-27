@@ -214,12 +214,19 @@ printf 1 > /dev/wmtWifi         # wmt_dev_set_hif_btif() + mtk_wcn_wmt_func_on(W
 | `soc1_0_patch_mcu_2a_1_hdr.bin` | `wmt_dev.c:459` |
 | `soc1_0_ram_mcu_2a_1_hdr.bin`, `soc1_0_ram_wifi_2a_1_hdr.bin`, `soc1_0_ram_bt_2a_1_hdr.bin` | `wmt_ctrl.c:654-656` |
 | `WIFI_RAM_CODE_soc1_0_2a_1.bin` | `gl_kal.c` → `connacConstructFirmwarePrio()`; el `2a` sale de `CFG_WIFI_IP_SET(2)` + `kalGetFwFlavor()` en `plat/mt6785/plat_priv.c:122`, que devuelve `'a'` |
-| `wifi.cfg` | `gl_init.c:3322`, dentro de `wlanGetParseConfig()`. **En realidad no lo lee nadie**: solo hay llamadas a esa función bajo `CFG_SUPPORT_EASY_DEBUG`, y en el fwport no hay ninguna, así que es código muerto (y por eso da igual que falte) |
-| `txpowerctrl.cfg` | `rlm_domain.c:4683`, `txPwrCtrlLoadConfig()`. **Opcional de verdad**: antes de tocarlo, el driver rellena la lista con la tabla compilada `g_au1TxPwrDefaultSetting`; si el cfg no está, solo avisa por log a nivel INFO |
+| `wifi.cfg` | `gl_init.c:3361`, `wlanGetConfig()`, llamada desde `wlanOnPreAdapterStart()` con `CFG_SUPPORT_CFG_FILE=1`. **No hace falta para arrancar**: primero hace `wlanCfgInit(prAdapter, NULL, 0, 0)`, o sea que parte de la tabla compilada, y solo vuelve a llamar `wlanCfgInit` con el fichero si el buffer viene relleno |
+| `txpowerctrl.cfg` | `rlm_domain.c`, `txPwrCtrlLoadConfig()` (con `CFG_SUPPORT_DYNAMIC_PWR_LIMIT=1`). Igual que el anterior: mete antes la lista con la tabla compilada `g_au1TxPwrDefaultSetting` y luego intenta el cfg; si no está, solo avisa por log a nivel INFO |
+
+Los dos son opcionales en el sentido de que sin ellos el firmware arranca igual con los valores
+compilados, pero como los instalamos, se usan: en lo que se pierde es en la calibración y la
+configuración de fábrica (tiempo de baliza, offset de canal secundario, límites de potencia).
+
+Los dos buscan también en `/data/misc/wifi/` y `/storage/sdcard0/`, por si acaso.
 
 Que la lista de la MR de firmware del autor (`mt6785-mainline/firmware` !1: *"WMT_SOC.cfg +
-wifi.cfg + soc1_0 ram/patch (mcu/bt/wifi) + WIFI_RAM_CODE"*) incluya `wifi.cfg` no significa que
-haga falta: incluye todo lo que había en el device original, y `wifi.cfg` es de los que no se usan.
+wifi.cfg + soc1_0 ram/patch (mcu/bt/wifi) + WIFI_RAM_CODE"*) incluya `wifi.cfg` no dice nada de si
+hace falta: es la lista de lo que había en el device original, y ese fichero está en el mismo
+cajón que los que sí se leen.
 
 No hace falta EEPROM de calibración: el driver lo pide como `CFG_EEPRM_FILENAME_MT%x.bin`, y si el
 fichero no está cae al **modo eFuse** (`ucSourceMode = 0`), que es lo normal en un móvil.
