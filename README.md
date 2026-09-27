@@ -6,21 +6,18 @@ El build corre en el runner (no se necesita hardware local potente) y produce ar
 
 ## Estado: build verde
 
-El run **`36304158010`** (commit `bfc2bdb`) salió **verde** el 27-09-2026: kernel
-con los drivers, initramfs con el firmware Tianma, Plasma Mobile y export. El
-artifact son 4,3 GB y ya está descargado y verificado en
-`work-begonia/kupfer-img/pmos-img/x/` (initramfs con 377 ficheros, los 7
-módulos de panel/táctil dentro y el md5 del firmware Tianma bajo el nombre
-CSOT). Instrucciones de flasheo en `kupfer-img/LEEME-flash.md`.
+El run **`36309275971`** (commit `03630c8`) salió **verde** el 27-09-2026: kernel
+con los drivers, initramfs con el firmware Tianma, los 7 blobs MediaTek en la
+rootfs, Plasma Mobile y export. Artifact `pmos-begonia-wifi-6.16.4-cross-false`
+(id `10928553872`). Instrucciones de flasheo en `kupfer-img/LEEME-flash.md`.
 
-**Ojo, esa imagen no vale para probar el wifi interno.** Al montar su rootfs se
-vio que **no tenía ni un blob en `/lib/firmware/mediatek/`**: el subpaquete
-`firmware-xiaomi-begonia-connectivity` (7 blobs, 766 KB) sí se construía, pero
-no se instalaba, porque el `APKBUILD` sobrepuesto de `device-xiaomi-begonia`
-tenía exactamente la versión publicada en `edge` (`6-r0`) y apk da por buena la
-del repo en vez de construir la local. Corregido en el commit `6e4fa58`
-(`pkgrel=1` + un paso de CI que lo comprueba) y relanzado como
-**`36307235048`**. La imagen buena es la de ese run, no la de `36304158010`.
+### Los dos runs anteriores y por qué ya no valen
+
+| Run | Commit | Qué pasó |
+|---|---|---|
+| `36304158010` | `bfc2bdb` | Verde, pero **su imagen no vale para probar el wifi interno**: al montar la rootfs se vio que **no tenía ni un blob en `/lib/firmware/mediatek/`**. El subpaquete `firmware-xiaomi-begonia-connectivity` (7 blobs, 766 KB) sí se construía, pero no se instalaba, porque el `APKBUILD` sobrepuesto de `device-xiaomi-begonia` tenía exactamente la versión publicada en `edge` (`6-r0`) y apk da por buena la del repo en vez de construir la local. |
+| `36307235048` | `6e4fa58` | El `pkgrel=1` arregló lo anterior y destapó un **hash roto que llevaba semanas sin comprobarse**: el `sha512sums` del APKBUILD de pmaports es el de sus propios ficheros, y nuestro `deviceinfo` está modificado (`deviceinfo_rootfs_image_sector_size="4096"` + `deviceinfo_flash_sparse`), así que `abuild` abortó con `Use 'abuild checksum'`. |
+| **`36309275971`** | **`03630c8`** | **Verde. Esta es la imagen buena.** Además del `pkgrel=1`, lleva el sha512 real de los tres ficheros locales y un paso de CI que lo recalcula en cada build. |
 
 
 ## El problema que resuelve
