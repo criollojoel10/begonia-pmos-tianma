@@ -13,6 +13,16 @@ artifact son 4,3 GB y ya está descargado y verificado en
 módulos de panel/táctil dentro y el md5 del firmware Tianma bajo el nombre
 CSOT). Instrucciones de flasheo en `kupfer-img/LEEME-flash.md`.
 
+**Ojo, esa imagen no vale para probar el wifi interno.** Al montar su rootfs se
+vio que **no tenía ni un blob en `/lib/firmware/mediatek/`**: el subpaquete
+`firmware-xiaomi-begonia-connectivity` (7 blobs, 766 KB) sí se construía, pero
+no se instalaba, porque el `APKBUILD` sobrepuesto de `device-xiaomi-begonia`
+tenía exactamente la versión publicada en `edge` (`6-r0`) y apk da por buena la
+del repo en vez de construir la local. Corregido en el commit `6e4fa58`
+(`pkgrel=1` + un paso de CI que lo comprueba) y relanzado como
+**`36307235048`**. La imagen buena es la de ese run, no la de `36304158010`.
+
+
 ## El problema que resuelve
 
 El kernel mainline que trae pmOS **solo soporta la variante de panel CSOT**, y pmOS instala **solo el firmware CSOT** del táctil. Los Redmi Note 8 Pro con panel **Tianma** (como el de este proyecto) quedan con el **touch invertido**: la pantalla enciende y no hay ningún error en el log, pero los ejes van cruzados.
@@ -302,6 +312,22 @@ un kernel que se compiló sin ellos no pase por verde.
 
 ## Errores que no hay que repetir
 
+- **Un `APKBUILD` sobrepuesto con la MISMA versión que la publicada no se
+  construye: apk usa la del repo.** Es la trampa más cara de este workflow,
+  porque no da ningún error. El `device-xiaomi-begonia` sobrepuesto solo
+  cambiaba la lista de `depends` (le añadía
+  `firmware-xiaomi-begonia-connectivity`) y se quedó en `6-r0`, la misma
+  versión que hay publicada en `edge`, así que apk instaló la del repo y la
+  dependencia nueva desapareció sin quejarse. El subpaquete `connectivity` sí se
+  construía (766,5 KB, se ve en el log) pero al no depender de él nadie lo
+  instalaba, y la imagen salía **verde, arrancaba y no tenía ni un blob en
+  `/lib/firmware/mediatek/`**: justo lo que `wlan_gen4m` necesita para pedir
+  firmware por `request_firmware()`, o sea que `wlan0` no podía aparecer nunca.
+  Lo delata `/lib/apk/db/installed` (el `D:` de `device-xiaomi-begonia` sin
+  `-connectivity`). **Regla: cualquier cambio de `depends` en un APKBUILD
+  sobrepuesto va con `pkgrel` subido.** El `firmware-xiaomi-begonia` se
+  construía bien solo porque su `pkgver` (20260617) es más nuevo que el
+  publicado (20250810).
 - **`zstd` ausente en makedepends rompe el kernel.** El config de pmaports trae
   `CONFIG_MODULE_COMPRESS_ZSTD=y` + `MODULE_COMPRESS_ALL=y`, así que `modules_install` invoca el
   binario `zstd` y sin él falla con
