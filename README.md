@@ -172,9 +172,10 @@ hasta `modules_install` **verificado**: el run `36262126701` confirmó los tres 
 (`wmt_drv.ko`, `wlan_gen4m.ko`, `mtk-vendor-btif.ko`); el run falló después, solo en el verify, por
 nombres de módulo mal escritos en la lista de dongles (fix `d664db9`, ver más abajo).
 
-Lo que **no** está verificado es que el wifi interno funcione en el dispositivo. El kernel del fork se
-describe a sí mismo como *"work-in-progress bring-up vehicle"* y el propio autor del trigger pone
-`RUNTIME-UNPROVEN: compile/link verified only`.
+Lo que **no** está verificado es el **empaquetado**, no el driver: que los módulos carguen en orden,
+que el firmware esté donde el driver lo busca y que el `1` del trigger se comporte como en el
+bring-up de su autor. El driver en sí **sí funciona en un begonia**, y lo verificó quien lo escribió
+([ver](#el-wifi-verificado-por-su-autor-sin-probar-por-nosotros)).
 
 ### El DTS del fork sí está completo
 
@@ -191,7 +192,10 @@ El driver **no se autoprobea**: los `platform_device` existen desde `of_platform
 cargar los módulos en orden y usar el trigger:
 
 ```sh
-# .github/scripts/mtk-wifi-test.sh hace todo esto y da un veredicto
+# .github/scripts/mtk-wifi-test.sh hace todo esto y da un veredicto.
+# Su paso 8 vuelca además /proc/driver/{wmt_dbg,wmt_dump_info,wmt_aee}, la
+# instrumentación que dejó el propio autor del fwport: si wlan0 no sale, ahí
+# está el motivo (BTIF / conn-MCU / firmware).
 modprobe mtk-vendor-btif        # transporte de control hacia el conn-MCU
 modprobe wmt_drv                # crea /dev/wmtWifi
 modprobe wlan_gen4m             # registra el probe de gen4m
@@ -210,19 +214,76 @@ printf 1 > /dev/wmtWifi         # wmt_dev_set_hif_btif() + mtk_wcn_wmt_func_on(W
 | `soc1_0_patch_mcu_2a_1_hdr.bin` | `wmt_dev.c:459` |
 | `soc1_0_ram_mcu_2a_1_hdr.bin`, `soc1_0_ram_wifi_2a_1_hdr.bin`, `soc1_0_ram_bt_2a_1_hdr.bin` | `wmt_ctrl.c:654-656` |
 | `WIFI_RAM_CODE_soc1_0_2a_1.bin` | `gl_kal.c` → `connacConstructFirmwarePrio()`; el `2a` sale de `CFG_WIFI_IP_SET(2)` + `kalGetFwFlavor()` en `plat/mt6785/plat_priv.c:122`, que devuelve `'a'` |
-| `wifi.cfg` | `gl_init.c:3322` (opcional: si falta, prueba rutas Android y sigue) |
+| `wifi.cfg` | `gl_init.c:3322`, dentro de `wlanGetParseConfig()`. **En realidad no lo lee nadie**: solo hay llamadas a esa función bajo `CFG_SUPPORT_EASY_DEBUG`, y en el fwport no hay ninguna, así que es código muerto (y por eso da igual que falte) |
+| `txpowerctrl.cfg` | `rlm_domain.c:4683`, `txPwrCtrlLoadConfig()`. **Opcional de verdad**: antes de tocarlo, el driver rellena la lista con la tabla compilada `g_au1TxPwrDefaultSetting`; si el cfg no está, solo avisa por log a nivel INFO |
+
+Que la lista de la MR de firmware del autor (`mt6785-mainline/firmware` !1: *"WMT_SOC.cfg +
+wifi.cfg + soc1_0 ram/patch (mcu/bt/wifi) + WIFI_RAM_CODE"*) incluya `wifi.cfg` no significa que
+haga falta: incluye todo lo que había en el device original, y `wifi.cfg` es de los que no se usan.
 
 No hace falta EEPROM de calibración: el driver lo pide como `CFG_EEPRM_FILENAME_MT%x.bin`, y si el
 fichero no está cae al **modo eFuse** (`ucSourceMode = 0`), que es lo normal en un móvil.
 
+### El wifi: verificado por su autor, sin probar por nosotros
+
+Merece la pena ser preciso, porque "nunca se ha ejecutado" y "nadie lo ha ejecutado" son
+afirmaciones muy distintas para este driver.
+
+- **El driver funciona en este móvil, y lo verificó quien lo escribió.** El forward-port es el MR
+  !2 de `mt6785-mainline/linux` (*"Draft: begonia (MT6785): conn/WiFi vendor forward-port"*), de
+  **minorum**: su descripción afirma que `wlan0` escanea y se asocia en 2.4 y 5 GHz, con DHCP y ping
+  verificados en hardware. El historial encaja con eso: el commit `b8c1b8b5` ("Verified on
+  hardware: this clears the 'no hif info' gate; STP/BTIF now activates") y los volcados de registros
+  en vivo de `0468921f` son apuntes de bring-up, no teoría. Nuestro kernel es la punta de esa serie
+  (`3a1ea76942`).
+- **Fuera de ese bring-up, nadie ha probado este stack en un begonia.** El MR !2 no tiene ni un
+  comentario y nadie ha contestado, así que no hay un segundo informe de nadie. Es un MR
+  *cross-fork* (del fork del autor, `minorum/linux`, a `mt6785-mainline/linux`) y lleva desde junio
+  de 2026 sin que nadie lo mueva, que es lo razonable para una importación de fabricante de ~545k
+  líneas etiquetada como *"not proposing merge yet"*. Somos los primeros en probarlo en pmOS con
+  este empaquetado, y los primeros en llevarlo a Kupfer.
+- El `RUNTIME-UNPROVEN` que sí aparece en el árbol es **más estrecho y más antiguo** que todo eso:
+  está en `mediatek-wifi.sh`, pegado al write de `1`, y habla solo del **orden** del `func_on` (un
+  `func_on` a pelo, sin el BTIF registrado antes, no arranca). No es un veredicto sobre el driver.
+- Una preocupación que miré y descarté: `WIFI_EINT` y los pines `gpio_combo_*` faltan en el DTS,
+  pero pertenecen al camino reimpl ya retirado (`MTK_CONNINFRA_MT6785`, que el MR !2 apaga a
+  propósito por conflicto con el consys de fabricante), no al forward-port que corre. Esa lectura es
+  mía, no del autor.
+
 ### Por qué el Bluetooth interno no se puede
 
-`mtk-vendor-btif.ko` (controlado por `MTK_WMT_FWPORT_BTIF`) es solo el transporte de control del WMT
-hacia el conn-MCU: **no registra ningún HCI** (no hay `hci_register_dev` en
-`drivers/misc/mediatek/btif/`), así que BlueZ no lo puede usar. El único driver HCI de MediaTek del
-árbol, `drivers/bluetooth/btmtkuart.c`, es para routers con UART (`mt7622`, `mt7663u`, `mt7668u`) y
-begonia no expone el BT del MCU por UART. Haría falta un driver HCI nuevo sobre BTIF o el userspace
-vendor `mtk_bt_stack`, que no está disponible. El BT usable es el de un **dongle USB** (`btusb`).
+No es un problema de configuración: **falta el driver**. No hay ningún blob de firmware ni ningún
+servicio que lo arregle. Y conviene no confundir "el Bluetooth no funciona" con "el Bluetooth no está
+portado a medias":
+
+Lo que sí está, y es bastante:
+
+- El móvil lleva el **mismo BTIF que usa el wifi que funciona**. El MCU de conectividad, el canal de
+  control WMT y el transporte STP son un stack único, y en begonia el transporte STP vivo *es* el
+  BTIF (todo el tráfico sale por `mtk_wcn_btif_write`). Por eso `mtk-vendor-btif` no es un
+  transportador genérico: es el mismo camino que usa el `wmt_drv` que ya funciona.
+- El nodo DT está en mainline y viene **habilitado por defecto**: `btif@1100c000`
+  (`compatible = "mediatek,btif"`, tres rangos `reg`, IRQs 138/155/154, clocks `btifc`/`apdmac`) en
+  `arch/arm64/boot/dts/mediatek/mt6785.dtsi`. Nuestro módulo lo enlaza, el blob de BT
+  (`soc1_0_ram_bt_2a_1_hdr.bin`) está en la imagen, y `BGF_EINT` (`GIC_SPI 321`) también está
+  cableado en el DTS de begonia.
+
+Lo que falta es la **capa HCI**, el driver que leería ese transporte y se lo entregaría a BlueZ. Nada
+en `drivers/bluetooth/` consume el BTIF, y no hay ninguna llamada a `hci_register_dev()` en todo
+`drivers/misc/mediatek/`: no existe `hci0`, se carguen los módulos como se carguen. `btmtk.c` es solo
+la biblioteca compartida (`EXPORT_SYMBOL_GPL`), no registra ningún HCI.
+
+Las dos vías que podrían parecer un atajo se descartan solas:
+
+- `btmtkuart.c` es el único driver HCI de MediaTek del árbol, pero maneja un chip de BT **externo**
+  por un UART de verdad (`mt7622`, `mt7663u`, `mt7668u`: SoCs de router; el móvil no lleva ninguno
+  integrado), y el `btif` del móvil no es un UART, así que su extensión de línea de comandos ni
+  llega a activarse. `btmtksdio.c` es para `mt7921s`, otro caso distinto.
+- El `userspace` vendor `mtk_bt_stack` no es redistribuible, y el shim 8250-BTIF al estilo vendor
+  (`8250_btif` + `btmtkuart_hci`) se propuso en 2017 y nunca entró en mainline.
+
+**El BT usable es el de un dongle USB** (`btusb`). El blob `soc1_0_ram_bt` se queda en la imagen
+porque forma parte del set que carga el bring-up de wifi, no porque sirva para algo hoy.
 
 Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
 
@@ -264,20 +325,22 @@ forward-port del stack vendor existe en el árbol pero está `default n` en Kcon
 
 ## El stack de conectividad está en el MISMO commit que ya compilamos
 
-Dato que cambia las cuentas: la rama **`begonia-conn-wifi`** de `minorum/linux` apunta a
+Dato que cambia las cuentas: la rama **`begonia-conn-wifi`** del fork `minorum/linux` apunta a
 `3a1ea7694219eb2fd513f0e630f2a882eab5c86f`, que es exactamente el `_tag` que buildea nuestro
 APKBUILD. O sea que **no hace falta ni otro kernel ni el MR !8852 (7.1)** para tener
-touch + WiFi + BT:
+touch + WiFi:
 
 | Módulo | Origen en el árbol | Qué es |
 |---|---|---|
 | `wmt_drv.ko` | `drivers/misc/mediatek/connectivity/common/` | WMT/STP/connsys bring-up (stage-1), crea `/dev/wmtdetect` y hace el handshake del conn-MCU |
 | `wlan_gen4m.ko` | `drivers/misc/mediatek/connectivity/wlan/gen4m/` | WLAN fullmac cfg80211 (stage-2), registra `wlan0`; 93 TU, subset CONNAC/AXI/6785 |
-| `mtk-vendor-btif.ko` | `drivers/misc/mediatek/btif/common/` | BTIF: lleva el tráfico de control WMT al conn-MCU |
+| `mtk-vendor-btif.ko` | `drivers/misc/mediatek/btif/common/` | BTIF: lleva el tráfico de control WMT al conn-MCU. **No aporta HCI**, así que el Bluetooth interno sigue sin poder: ver [Por qué el Bluetooth interno no se puede](#por-qué-el-bluetooth-interno-no-se-puede) |
 
 Kconfig: `MTK_WMT_FWPORT` (padre) → `MTK_WMT_DRV`, `MTK_WLAN_GEN4M`, `MTK_WMT_FWPORT_BTIF`.
 Los cuatro están `default n`, y `enable_kernel_drivers.sh` los activa con `mtk_gen4m=1`
-(además de `CONFIG_WEXT_CORE=y`, que `wlan_gen4m.ko` necesita por `wireless_send_event`).
+(además de `CONFIG_CFG80211_WEXT=y`, que es el símbolo que hace `select WEXT_CORE`; ver
+[arriba](#mtk_gen4m-por-qué-está-desactivado-por-defecto) para por qué poner `WEXT_CORE` a mano
+no vale).
 
 El DTS de 6.16.4 de la rama ya trae lo necesario: nodo `connectivity-combo`
 (`GIC_SPI 321` = BGF_EINT) y las reservas de memoria `consys@ab000000` (4 MB) y
@@ -398,7 +461,25 @@ un kernel que se compiló sin ellos no pase por verde.
 
 ## Referencias
 
+Lo nuestro:
+
 - MR !8852: https://gitlab.postmarketos.org/postmarketOS/pmaports/-/merge_requests/8852
-- Kernel mainline mt6785: https://github.com/external-mirrors/mt6785-mainline-linux (ramas `6.16`, `7.1`, `battery-downstream`)
-- Firmware touch: https://gitlab.postmarketos.org/mt6785-mainline/firmware
 - Wiki pmOS begonia: https://wiki.postmarketos.org/wiki/Xiaomi_Redmi_Note_8_Pro_(xiaomi-begonia)
+- Dispositivos: `pmaports/device/testing/{device,firmware}-xiaomi-begonia` y
+  `linux-postmarketos-mediatek-mt6785` (el paquete de kernel de este repo es ese, pineado a un
+  commit)
+
+Lo del driver de conectividad, que **no es nuestro** (de ahí vienen el forward-port y los 7 blobs,
+y de ahí el crédito):
+
+- Kernel: https://gitlab.postmarketos.org/mt6785-mainline/linux, MR **!2** *"Draft: begonia (MT6785):
+  conn/WiFi vendor forward-port"*, de **minorum**, MR *cross-fork*: rama `begonia-conn-wifi` en su
+  fork `https://gitlab.postmarketos.org/minorum/linux` (id 1492) → `6.16` en el upstream (id 780).
+  La cabeza de esa rama, `3a1ea76942`, es el commit que buildea nuestro APKBUILD; el `6.16` del
+  fork se quedó en `203a993f`, que es el tag base de pmaports (y por eso el paquete de pmaports
+  solo no trae el stack de conectividad)
+- Firmware: https://gitlab.postmarketos.org/mt6785-mainline/firmware, MR **!1** del mismo autor
+- Espejo en GitHub: https://github.com/external-mirrors/mt6785-mainline-linux (ramas `6.16`, `7.1`,
+  `battery-downstream`)
+- Para contrastar con otro SoC del mismo connsys: https://github.com/hataketsu/mt6768-mainline-notes
+  (Redmi 9 / MT6768), donde el fwport de gen4m compila pero nunca se ha ejecutado

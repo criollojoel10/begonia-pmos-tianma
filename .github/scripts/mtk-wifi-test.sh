@@ -2,9 +2,8 @@
 # Prueba del stack WiFi/BT interno de MediaTek (begonia, MT6785).
 #
 # Vale igual en postmarketOS (busybox ash) y en Kupfer (systemd/coreutils).
-# No cambia nada del sistema: solo carga modulos, escribe el trigger y lee
-# dmesg. Lo unico que escribe es /dev/wmtWifi, que es justamente el interruptor
-# del wifi.
+# No cambia nada del sistema: solo carga modulos y lee dmesg/proc. Lo unico que
+# escribe es /dev/wmtWifi, que es justamente el interruptor del wifi.
 #
 # Uso: hay que ejecutarlo como root (modprobe y el write a /dev/wmtWifi, que es
 # 0660 root:root).
@@ -13,6 +12,10 @@
 #
 # Salida esperada si todo va bien: "wlan0" presente, rfkill con el soft/hard
 # block en 0 y en dmesg "[wmtWifi] WIFI function ON".
+#
+# Esto prueba el empaquetado (orden de carga, firmware en su sitio, el trigger),
+# no el driver: el driver esta verificado en hardware por su autor (minorum) en un
+# begonia, donde wlan0 escanea y se asocia en 2.4/5 GHz con DHCP y ping.
 
 set -u
 FAIL=0
@@ -39,17 +42,29 @@ FW=/usr/lib/firmware/mediatek
 [ -d "$FW" ] || FW=/lib/firmware/mediatek
 if [ -d "$FW" ]; then
 	ok "$FW existe"
-	# Los 7 blobs del subpaquete firmware-xiaomi-begonia-connectivity.
-	# wifi.cfg no se lista al principio en el APKBUILD, pero es imprescindible:
-	# sin el, conninfra no tiene parametros de configuracion y el firmware no
-	# arranca.
+	# Los 6 blobs que el driver pide de verdad: wmt_dev.c (WMT_SOC.cfg,
+	# soc1_0_patch_mcu), wmt_ctrl.c (soc1_0_ram_{mcu,wifi,bt}) y gl_kal.c
+	# (WIFI_RAM_CODE, vía connacConstructFirmwarePrio).
 	for f in WMT_SOC.cfg soc1_0_patch_mcu_2a_1_hdr.bin soc1_0_ram_mcu_2a_1_hdr.bin \
-		soc1_0_ram_wifi_2a_1_hdr.bin soc1_0_ram_bt_2a_1_hdr.bin WIFI_RAM_CODE_soc1_0_2a_1.bin \
-		wifi.cfg; do
+		soc1_0_ram_wifi_2a_1_hdr.bin soc1_0_ram_bt_2a_1_hdr.bin WIFI_RAM_CODE_soc1_0_2a_1.bin; do
 		if [ -e "$FW/$f" ] || [ -e "$FW/$f.zst" ]; then
 			ok "$f"
 		else
 			bad "$f falta en $FW"
+		fi
+	done
+	# wifi.cfg y txpowerctrl.cfg no hacen falta, y no por un fallback:
+	# - wifi.cfg solo lo lee wlanGetParseConfig() (gl_init.c:3311), una rutina de
+	#   debug bajo CFG_SUPPORT_EASY_DEBUG que no tiene ninguna llamada en el fwport.
+	# - txpowerctrl.cfg lo carga txPwrCtrlLoadConfig() (rlm_domain.c:4683) despues
+	#   de rellenar la lista con la tabla compilada g_au1TxPwrDefaultSetting; si
+	#   falta, solo avisa con DBGLOG a nivel INFO.
+	# Se listan igual, para saber que estado tienen: el paquete los instala.
+	for f in wifi.cfg txpowerctrl.cfg; do
+		if [ -e "$FW/$f" ] || [ -e "$FW/$f.zst" ]; then
+			info "$f presente (opcional, el driver no lo necesita)"
+		else
+			info "$f ausente (normal: es opcional)"
 		fi
 	done
 else
@@ -119,14 +134,64 @@ else
 	bad "wlan0 no aparece: el firmware no arranco o el probe no llego a hacer ioctl"
 fi
 
-say "8. otras interfaces (por si el trigger no hizo nada pero hay dongle)"
+say "8. diagnostico del WMT (proc del driver)"
+# El fwport deja instrumentacion propia, y es lo mas util si wlan0 no sale: el
+# volcado del estado del chip dice si el problema es el BTIF, el conn-MCU o el
+# firmware.
+info "dispositivos de clase del stack:"
+ls -d /sys/class/*wmt* /dev/stpwmt 2>/dev/null | sed 's/^/    /' || info "    (ninguno: wmt_drv no creo sus dispositivos)"
+
+# Chip id, version del firmware y estado del HIF. Si el chip-id hw_check falla,
+# el BTIF no abrio o el conn-MCU no arranco (asi se documento el debug del autor).
+if [ -r /proc/driver/wmt_dbg ]; then
+	ok "/proc/driver/wmt_dbg"
+	head -c 2000 /proc/driver/wmt_dbg 2>/dev/null | sed 's/^/    /'
+else
+	info "/proc/driver/wmt_dbg no disponible"
+fi
+
+if [ -r /proc/driver/wmt_dump_info ]; then
+	ok "/proc/driver/wmt_dump_info"
+	head -c 4000 /proc/driver/wmt_dump_info 2>/dev/null | sed 's/^/    /'
+else
+	info "/proc/driver/wmt_dump_info no disponible"
+fi
+
+# wmt_aee es el dump de excepcion del propio firmware (buffer de 3072 B): si el
+# conn-MCU se cuelga o hace assert, esto dice por que.
+if [ -r /proc/driver/wmt_aee ]; then
+	ok "/proc/driver/wmt_aee"
+	if [ -s /proc/driver/wmt_aee ]; then
+		head -c 3072 /proc/driver/wmt_aee 2>/dev/null | sed 's/^/    /'
+	else
+		info "    (vacio: no hay ninguna excepcion registrada)"
+	fi
+else
+	info "/proc/driver/wmt_aee no disponible"
+fi
+
+# wmt_user_proc es write-only (no tiene proc_read), asi que no se puede leer.
+# Se deja el comando apuntado y NO se ejecuta: llama a
+# mtk_wcn_wmt_func_on(WMTDRV_TYPE_WIFI=3) igual que el trigger, pero sin
+# wmt_dev_set_hif_btif(), asi que sin el btif registrado se queda en el mismo
+# "no hif info". Solo serviria para confirmar que la llamada llega al conn-MCU, y
+# no merece la pena arriesgar el estado del MCU en el unico intento con el movil.
+if [ -e /proc/driver/wmt_user_proc ]; then
+	info "/proc/driver/wmt_user_proc existe (solo escritura). Para probarlo a mano:"
+	info "    echo '0 3 1' > /proc/driver/wmt_user_proc   # 0=func_ctrl 3=WIFI 1=on"
+else
+	info "/proc/driver/wmt_user_proc no disponible"
+fi
+
+say "9. otras interfaces (por si el trigger no hizo nada pero hay dongle)"
 ls /sys/class/net | sed 's/^/    /'
 
 say "veredicto"
 if [ "$FAIL" -eq 0 ]; then
-	info "sin fallos en los pasos 1-6. Si wlan0 no sale, mira el dmesg del paso 7."
+	info "sin fallos en los pasos 1-6. Si wlan0 no sale, mira el dmesg del paso 7"
+	info "y el diagnostico del WMT del paso 8."
 else
-	info "$FAIL comprobaciones fallidas; el dmesg del paso 7 es la pista principal."
+	info "$FAIL comprobaciones fallidas; el paso 7 y el paso 8 son la pista principal."
 fi
 echo
 echo "Para apagar el wifi de nuevo: printf 0 > /dev/wmtWifi"
