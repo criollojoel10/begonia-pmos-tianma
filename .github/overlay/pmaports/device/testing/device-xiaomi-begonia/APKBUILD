@@ -54,7 +54,14 @@ package() {
 	# registrado. Un oneshot antes de NetworkManager es lo que hace falta.
 	install -Dm755 "$srcdir/mediatek-wifi.sh" \
 		"$pkgdir/usr/libexec/mediatek-wifi.sh"
-	install -Dm644 "$builddir/mediatek-wifi.service" \
+	# $srcdir y no $builddir: los ficheros de source= se leen del directorio
+	# de pmaports, que es el $srcdir, y $builddir solo contiene lo que genera
+	# build() (el empty.dtb/empty.dtbo de mas arriba). Con $builddir aqui
+	# install no encontraba el fichero y el paquete no se construia:
+	#   install: can't stat '.../src/device-xiaomi-begonia-7/mediatek-wifi.service'
+	# (run 36332784685). El .sh de justo encima si usaba $srcdir, y por eso
+	# solo fallaba la mitad.
+	install -Dm644 "$srcdir/mediatek-wifi.service" \
 		"$pkgdir/usr/lib/systemd/system/mediatek-wifi.service"
 
 	# El servicio tiene que arrancar en cada boot. Mismo idiom que el paquete
