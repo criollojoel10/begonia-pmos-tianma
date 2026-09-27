@@ -144,7 +144,7 @@ jobs:
           find "$PMAPORTS_DIR/device" -maxdepth 4 -iname "*begonia*" -print | tee artifacts/preflight/begonia-files.txt
           grep -rE "device-xiaomi-begonia|linux-postmarketos-mediatek-mt6785|firmware-xiaomi-begonia" "$PMAPORTS_DIR/device/testing" > artifacts/preflight/grep-begonia.txt 2>&1 || true
 
-      - name: Config (kernel default, Phosh base)
+      - name: Config (kernel default, Plasma Mobile base)
         run: |
           rm -rf "$PMB_WORK"
           mkdir -p $HOME/.config
@@ -156,7 +156,14 @@ jobs:
             CROSS_CFG="False"
           fi
 
-          printf '[pmbootstrap]\naports = %s\nwork = %s\ndevice = xiaomi-begonia\nkernel = stable\nui = phosh\nuser = joel\nextra_space = %s\nssh_keys = False\nsudo_timer = False\n\n[build_options]\ncross = %s\n' \
+          # ui = plasma-mobile, no phosh: es el metapackage de pmOS que instala
+          # Plasma Mobile como display manager. Con phosh la imagen arrastraba
+          # greetd + greetd-phrog y las dos sesiones (phosh y plasma-mobile) en
+          # /usr/share/wayland-sessions, asi que greetd lanzaba un selector y no
+          # se sabia cual era. Con plasma-mobile no se instala greetd, el preset
+          # 90-base.preset habilita plasma-mobile.service y la imagen arranca
+          # directa en Plasma. Ver el paso "Verify the display manager" de abajo.
+          printf '[pmbootstrap]\naports = %s\nwork = %s\ndevice = xiaomi-begonia\nkernel = stable\nui = plasma-mobile\nuser = joel\nextra_space = %s\nssh_keys = False\nsudo_timer = False\n\n[build_options]\ncross = %s\n' \
             "$PMAPORTS_DIR" "$PMB_WORK" "${{ github.event.inputs.extra_space }}" "$CROSS_CFG" > "$PMB_CONFIG"
           mkdir -p "$PMB_WORK/cache_git"
           echo "8" > "$PMB_WORK/version"
@@ -246,7 +253,7 @@ jobs:
           echo "=== Newly built kernel packages ==="
           find "$PMB_WORK/packages" -name "${KERNEL_PKG}*.apk" 2>/dev/null
 
-      - name: Install Phosh base system
+      - name: Install Plasma Mobile base system
         run: |
           set -euxo pipefail
 
@@ -293,7 +300,7 @@ jobs:
             echo "Only ${FREE_GB}GB free, skipping swap"
           fi
 
-          echo "=== Start pmbootstrap install (Phosh) ==="
+          echo "=== Start pmbootstrap install (Plasma Mobile) ==="
           if [ "$FDE" = "true" ]; then
             printf '147147\n147147\n' | pmbootstrap "${PMB_FLAGS[@]}" install --fde
           else
@@ -396,8 +403,8 @@ jobs:
       # apk USA la del repo y no construye la nuestra. Con eso, la dependencia
       # firmware-xiaomi-begonia-connectivity se pierde en silencio (el paquete
       # connectivity si se construye, simplemente no se instala) y la imagen
-      # sale verde, arranca y no tiene ni un blob de /lib/firmware/mediatek/,
-      # que es exactamente lo que necesita wlan_gen4m para pedir su firmware.
+      # sale verde, arranca y no tiene ni un blob de MediaTek, que es
+      # exactamente lo que necesita wlan_gen4m para pedir su firmware.
       - name: Verify MediaTek connectivity firmware in the rootfs
         run: |
           set -euo pipefail
@@ -418,22 +425,105 @@ jobs:
               echo "::error::device-xiaomi-begonia no depende de firmware-xiaomi-begonia-connectivity (se instalo la version del repo, sube pkgrel)"; exit 1; }
             echo "OK: device-xiaomi-begonia depende del subpaquete connectivity"
           '
-          # 3) los 7 blobs, con tamano no nulo. Son los que wlan_gen4m/wmt_drv
-          #    piden con request_firmware(); sin ellos wlan0 no aparece.
+          # 3) los 7 blobs, con tamano no nulo, en la RAIZ de /lib/firmware/.
+          #    OJO: el fwport de minorum llama a request_firmware() con nombres
+          #    pelados, sin carpeta (wmt_conf.h:34, wmt_dev.c:406/459/508,
+          #    wmt_ctrl.c:654-656, config.h:149). El kernel solo los busca en
+          #    /lib/firmware/ y /usr/lib/firmware/ en la raiz, asi que en los
+          #    builds 36304158010 y 36309275971, que los ponian en
+          #    /lib/firmware/mediatek/, modprobe wmt_drv moria con
+          #    "Direct firmware load for WMT_SOC.cfg failed with error -2" y
+          #    wlan0 no aparecia nunca. Este check es lo que lo detecta.
           pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
             set -e
-            D=/lib/firmware/mediatek
-            ls -l $D
+            D=/lib/firmware
+            ls -l $D/WMT_SOC.cfg.zst $D/WIFI_RAM_CODE_soc1_0_2a_1.bin.zst
             for f in WIFI_RAM_CODE_soc1_0_2a_1.bin.zst WMT_SOC.cfg.zst \
                      soc1_0_patch_mcu_2a_1_hdr.bin.zst soc1_0_ram_bt_2a_1_hdr.bin.zst \
                      soc1_0_ram_mcu_2a_1_hdr.bin.zst soc1_0_ram_wifi_2a_1_hdr.bin.zst \
                      wifi.cfg.zst; do
               test -s "$D/$f" || { echo "::error::falta o vacio $D/$f (el wifi interno no cargara firmware)"; exit 1; }
             done
-            echo "OK: los 7 blobs demediatek estan en la imagen"
+            # y que no esten solo en un subdirectorio, que es el bug que se
+            # acaba de arreglar: si aparecen en $D/mediatek/ y no en la raiz,
+            # el driver no los encuentra.
+            for f in WIFI_RAM_CODE_soc1_0_2a_1.bin.zst WMT_SOC.cfg.zst; do
+              if [ -e "$D/mediatek/$f" ] && [ ! -e "$D/$f" ]; then
+                echo "::error::$f esta en firmware/mediatek/ y no en la raiz: request_firmware() no lo encontrara"; exit 1
+              fi
+            done
+            # y que el kernel sepa descomprimir los .zst solos
+            if [ -r /proc/config.gz ]; then
+              zcat /proc/config.gz | grep -q "FW_LOADER_COMPRESS_ZSTD=y" \
+                || { echo "::error::CONFIG_FW_LOADER_COMPRESS_ZSTD no esta activo"; exit 1; }
+              echo "OK: el kernel descomprime los .zst"
+            else
+              echo "AVISO: sin /proc/config.gz, no se puede comprobar FW_LOADER_COMPRESS_ZSTD"
+            fi
+            echo "OK: los 7 blobs de mediatek estan en la raiz de /lib/firmware/"
           '
 
-      - name: Build & Add Plasma Mobile UI
+      # El wifi no arranca solo en un port de pmOS: hay que cargar los tres
+      # modulos del fwport y escribir un 1 en /dev/wmtWifi. Sin este servicio el
+      # movil arranca sin wlan0 y el usuario tiene que hacerlo a mano (que es
+      # como se verifico que el driver funciona, antes de automatizarlo).
+      - name: Verify the wifi autostart service
+        run: |
+          set -euo pipefail
+          CROSS="${{ github.event.inputs.cross }}"
+          FLAGS=(-c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 --details-to-stdout)
+          if [ "$CROSS" = "false" ]; then
+            FLAGS+=(--no-cross)
+          fi
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            set -e
+            U=/usr/lib/systemd/system/mediatek-wifi.service
+            S=/usr/libexec/mediatek-wifi.sh
+            W=/usr/lib/systemd/system/multi-user.target.wants/mediatek-wifi.service
+
+            test -f "$U" || { echo "::error::falta $U"; exit 1; }
+            test -x "$S" || { echo "::error::$S no es ejecutable"; exit 1; }
+
+            # -L y no -e: un symlink roto tambien "existe" para -e si el destino
+            # es relativo, y aqui el destino es absoluto. Comprobar el destino
+            # es lo que de verdad importa.
+            test -L "$W" || { echo "::error::$W no es un symlink: el servicio no arrancara en el boot"; exit 1; }
+            T=$(readlink "$W")
+            echo "symlink: $W -> $T"
+            case "$T" in
+              /usr/lib/systemd/system/mediatek-wifi.service) ;;
+              *) echo "::error::el symlink apunta a $T, no a la ruta esperada"; exit 1 ;;
+            esac
+            test -e "$W" || { echo "::error::el symlink esta roto ($T no existe)"; exit 1; }
+
+            # y que el ExecStart apunte al script de verdad, no a una ruta
+            # inventada: un ExecStart a un fichero inexistente hace que el
+            # servicio falle en cada arranque sin que se note.
+            grep -q "^ExecStart=$S$" "$U" \
+              || { echo "::error::ExecStart no es $S"; grep ^ExecStart= "$U"; exit 1; }
+
+            # y que el script sea lo que creemos: modprobe de los tres modulos
+            # y el write a /dev/wmtWifi, que es el interruptor del conn-MCU.
+            for m in mtk-vendor-btif wmt_drv wlan_gen4m; do
+              grep -q "modprobe $m" "$S" \
+                || { echo "::error::el script no hace modprobe $m"; exit 1; }
+            done
+            grep -q "> /dev/wmtWifi" "$S" \
+              || { echo "::error::el script no escribe en /dev/wmtWifi: el chip no encendera"; exit 1; }
+            # sin shebang, systemd lo ejecuta con /bin/sh y falla
+            head -c 2 "$S" | grep -q "#!" || { echo "::error::el script no tiene shebang"; exit 1; }
+
+            # los tres modulos tienen que existir en la imagen, o el modprobe
+            # del servicio falla en el primer arranque
+            for m in mtk-vendor-btif wmt_drv wlan_gen4m; do
+              modinfo "$m" >/dev/null 2>&1 \
+                || { echo "::error::el modulo $m no esta en la imagen"; exit 1; }
+            done
+
+            echo "OK: el servicio de arranque del wifi esta instalado y bien cableado"
+          '
+
+      - name: Enforce Plasma Mobile as the only display manager
         run: |
           set -euxo pipefail
 
@@ -443,30 +533,138 @@ jobs:
             FLAGS+=(--no-cross)
           fi
 
-          echo "=== Searching for plasma-mobile in pmaports ==="
-          find "$PMAPORTS_DIR" -type d -name "postmarketos-ui-plasma-mobile" 2>/dev/null | head -5
-          find "$PMAPORTS_DIR" -type d -name "plasma-mobile" 2>/dev/null | head -5
+          CH() { pmbootstrap "${FLAGS[@]}" chroot --rootfs -- "$@"; }
 
-          echo "=== Building plasma-mobile UI from pmaports (local compile) ==="
-          # Soft-fail a proposito: si plasma-mobile no compila, queremos caer a
-          # una imagen Phosh funcional en vez de perder el install y con ella la
-          # imagen entera (este step usa set -e).
-          pmbootstrap "${FLAGS[@]}" build postmarketos-ui-plasma-mobile 2>&1 \
-            || echo "::warning::postmarketos-ui-plasma-mobile no compilo; continuando con Phosh"
+          # Con ui = plasma-mobile el metapackage correcto ya viene del
+          # `pmbootstrap install` de arriba. Este paso no anade nada: deja el
+          # estado como debe estar y falla si algo quedo de phosh.
+          echo "=== Paquetes de interfaz instalados ==="
+          CH sh -c 'apk info 2>/dev/null | grep -iE "^(phosh|postmarketos-ui|greetd|plasmalogin)" | sort'
 
-          echo "=== Building tinydm (needed for multi-UI support) ==="
-          pmbootstrap "${FLAGS[@]}" build tinydm 2>&1 || true
+          echo "=== Plasma Mobile presente ==="
+          CH sh -c 'apk info -e postmarketos-ui-plasma-mobile >/dev/null && echo "OK: postmarketos-ui-plasma-mobile instalado"'
 
-          echo "=== Installing plasma-mobile into device rootfs ==="
-          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- apk add --no-interactive postmarketos-ui-plasma-mobile 2>&1 \
-            || echo "::warning::no se pudo instalar plasma-mobile; la imagen quedara con Phosh"
+          # greetd viene de greetd-phrog, que solo lo arrastra postmarketos-ui-phosh.
+          # Si esta aun aqui, es que la imagen volveria al selector de sesion.
+          echo "=== phosh y greetd NO deben estar ==="
+          if CH sh -c 'apk info 2>/dev/null | grep -qE "^(phosh|greetd|postmarketos-ui-phosh)"'; then
+            echo "::error::La imagen arrastra phosh o greetd; el arranque dejaria de ser Plasma Mobile directo"
+            exit 1
+          fi
+          echo "OK: ni phosh ni greetd"
 
-          echo "=== Verifying installed UIs in rootfs ==="
-          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c 'apk info 2>/dev/null | grep -iE "phosh|plasma|kwin|plasma" | sort' 2>&1
+          echo "=== /etc/default_user (usuario de plasma-mobile.service) ==="
+          # El generador system-generators-plasma-mobile-user-override lee este
+          # fichero y hace un drop-in con User=/Group=. Si no existe, cae a
+          # 10000, que es el uid que pmbootstrap da al usuario (adduser -u 10000),
+          # asi que hoy funciona por coincidencia. Escribirlo evita depender de
+          # esa coincidencia: el unit trae User=1000, que NO es el usuario.
+          CH sh -c 'u=$(awk -F: "\$3==10000{print \$1}" /etc/passwd); echo "usuario con uid 10000: \$u"; printf "%s\n" "\$u" > /etc/default_user; cat /etc/default_user'
+          CH sh -c 'test -s /etc/default_user || { echo "FALLO: /etc/default_user vacio"; exit 1; }'
 
-          echo "=== Rebuilding OS image with plasma-mobile added ==="
+          echo "=== Habilitar plasma-mobile.service como display manager ==="
+          # El unit de plasma-mobile trae en [Install] SOLO "Alias=display-manager.service",
+          # sin WantedBy=. Consecuencias, comprobadas en el movil:
+          #  - "systemctl enable plasma-mobile.service" crea unicamente el alias, y
+          #    falla con "File ... already exists and is a symlink to greetd" si
+          #    quedo el de greetd de una imagen anterior.
+          #  - El alias por si solo no mete la unidad en ningun target, asi que no
+          #    basta para que arranque al boot.
+          # Por eso: symlink viejo fuera, enable para el alias, y el wants symlink
+          # explicito. El preset 90-base.preset dice "enable plasma-mobile.service",
+          # pero un preset solo se aplica al instalar el paquete.
+          CH sh -c 'rm -f /etc/systemd/system/display-manager.service'
+          CH systemctl enable plasma-mobile.service
+          CH sh -c 'ln -sf /usr/lib/systemd/system/plasma-mobile.service /etc/systemd/system/multi-user.target.wants/plasma-mobile.service'
+          CH sh -c 'test "$(systemctl is-enabled plasma-mobile.service)" = enabled || { echo "FALLO: plasma-mobile.service no queda enabled"; exit 1; }'
+          CH sh -c 'echo "display-manager.service -> $(readlink /etc/systemd/system/display-manager.service)"'
+          CH sh -c 'echo "multi-user.target.wants  -> $(readlink /etc/systemd/system/multi-user.target.wants/plasma-mobile.service)"'
+
+          echo "=== Sesiones de Wayland disponibles ==="
+          CH sh -c 'ls -1 /usr/share/wayland-sessions/ 2>/dev/null || echo "(ninguna)"'
+
+          echo "=== Reconstruir la imagen con el estado de la UI ==="
           pmbootstrap "${FLAGS[@]}" -E "${{ github.event.inputs.extra_space }}" -j 2 install --password 147147 2>&1
 
+      - name: Verify the display manager is Plasma Mobile
+        run: |
+          set -euo pipefail
+          CROSS="${{ github.event.inputs.cross }}"
+          FLAGS=(-c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 --details-to-stdout)
+          if [ "$CROSS" = "false" ]; then
+            FLAGS+=(--no-cross)
+          fi
+          # Con ui=phosh el arranque NO era Plasma Mobile: greetd ofrecia un
+          # selector con las sesiones de /usr/share/wayland-sessions (phosh,
+          # plasma-mobile, plasma) y habia que elegir a mano. Con
+          # ui=plasma-mobile no se instala greetd y el alias display-manager
+          # tiene que apuntar a plasma-mobile. Este check falla si eso regressa.
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            set -e
+            echo "=== metapackages de interfaz instalados ==="
+            apk info 2>/dev/null | grep -E "^(postmarketos-ui-)" | sort
+
+            echo "=== Plasma Mobile presente ==="
+            apk info -e postmarketos-ui-plasma-mobile >/dev/null \
+              || { echo "FALLO: la imagen no lleva postmarketos-ui-plasma-mobile"; exit 1; }
+            echo "OK: postmarketos-ui-plasma-mobile instalado"
+
+            echo "=== phosh y greetd NO deben estar ==="
+            if apk info 2>/dev/null | grep -qE "^(phosh|greetd|postmarketos-ui-phosh)"; then
+              echo "FALLO: la imagen arrastra phosh o greetd; el arranque dejaria de ser Plasma Mobile directo"
+              apk info 2>/dev/null | grep -E "^(phosh|greetd|postmarketos-ui-phosh)" | sort
+              exit 1
+            fi
+            echo "OK: ni phosh ni greetd"
+
+            echo "=== display-manager.service apunta a plasma-mobile ==="
+            DM=/etc/systemd/system/display-manager.service
+            if [ ! -L "$DM" ]; then
+              echo "FALLO: no hay symlink en $DM"
+              exit 1
+            fi
+            T=$(readlink "$DM")
+            echo "display-manager.service -> $T"
+            test "$T" = /usr/lib/systemd/system/plasma-mobile.service || {
+              echo "FALLO: display-manager.service deberia apuntar a plasma-mobile.service, no a $T"
+              exit 1
+            }
+
+            echo "=== plasma-mobile.service arranca al boot ==="
+            # El unit solo trae Alias= en [Install], sin WantedBy=, asi que el
+            # alias no mete la unidad en ningun target. Sin este wants symlink la
+            # imagen arrives a un prompt de login en vez de a Plasma Mobile.
+            W=/etc/systemd/system/multi-user.target.wants/plasma-mobile.service
+            if [ ! -L "$W" ]; then
+              echo "FALLO: falta $W; plasma-mobile.service no arrancaria al boot"
+              exit 1
+            fi
+            echo "multi-user.target.wants -> $(readlink "$W")"
+            test "$(systemctl is-enabled plasma-mobile.service)" = enabled || {
+              echo "FALLO: is-enabled de plasma-mobile.service no es enabled"
+              exit 1
+            }
+
+            echo "=== /etc/default_user (usuario del servicio) ==="
+            # Lo lee system-generators-plasma-mobile-user-override para el drop-in
+            # User=/Group=. Sin el fichero cae a 10000, que hoy coincide con el
+            # uid que pmbootstrap da, pero el unit trae User=1000.
+            test -s /etc/default_user || {
+              echo "FALLO: /etc/default_user vacio o ausente; el servicio correria como el uid equivocado (1000)"
+              exit 1
+            }
+            echo "/etc/default_user = $(cat /etc/default_user)"
+
+            echo "=== la sesion de Plasma Mobile esta disponible ==="
+            ls -1 /usr/share/wayland-sessions/
+            test -f /usr/share/wayland-sessions/plasma-mobile.desktop \
+              || { echo "FALLO: falta plasma-mobile.desktop en wayland-sessions"; exit 1; }
+            if [ -f /usr/share/wayland-sessions/phosh.desktop ]; then
+              echo "FALLO: quedo phosh.desktop; el movil podria arrancar en phosh"
+              exit 1
+            fi
+            echo "OK: Plasma Mobile es el unico display manager de la imagen"
+          '
       - name: Export (primary)
         if: always()
         run: |

@@ -2,13 +2,14 @@
 maintainer="Dinolek <git@dinolek.me>"
 pkgname=device-xiaomi-begonia
 pkgdesc="Xiaomi Redmi Note 8 Pro"
-pkgver=6
+pkgver=7
 # pkgrel=1, NO 0: sin esto apk da por buena la version publicada en edge
 # (device-xiaomi-begonia-6-r0) en vez de construir la de este arbol, que es
-# la unica que depende de firmware-xiaomi-begonia-connectivity. Con pkgrel=0
-# el build 36304158010 salio verde installing el paquete de edge y los 7 blobs
-# de /lib/firmware/mediatek/ se quedaron fuera de la imagen: sin ellos
-# wlan_gen4m no puede pedir firmware y wlan0 no aparece nunca.
+# la unica que depende de firmware-xiaomi-begonia-connectivity y la unica que
+# trae el servicio de arranque del wifi. Con pkgrel=0 el build 36304158010
+# salio verde installing el paquete de edge y los 7 blobs de firmware se
+# quedaron fuera de la imagen: sin ellos wlan_gen4m no puede pedir firmware y
+# wlan0 no aparece nunca.
 pkgrel=1
 url="https://postmarketos.org"
 license="MIT"
@@ -23,7 +24,7 @@ depends="
 	postmarketos-base
 "
 makedepends="android-tools devicepkg-dev dtc"
-source="deviceinfo kernel-cmdline.conf modules-initfs"
+source="deviceinfo kernel-cmdline.conf modules-initfs mediatek-wifi.sh mediatek-wifi.service"
 
 build() {
 	devicepkg_build $startdir $pkgname
@@ -40,6 +41,27 @@ package() {
 	mkdir -p "$pkgdir/boot"
 	install -Dm644 "$builddir/empty.dtbo" \
 		"$pkgdir/boot/"
+
+	# El wifi interno no arranca solo: hay que cargar los tres modulos del
+	# fwport de minorum y escribir un '1' en /dev/wmtWifi, que es lo que le
+	# pide al conn-MCU que levante el firmware del chip. Este servicio lo hace
+	# en el arranque; sin el, el movil arranca sin wlan0 y toca hacerlo a mano.
+	# Verificado en un begonia con el wifi asi encendido: escanea en 2.4 y
+	# 5 GHz y se asocia con DHCP.
+	#
+	# NO va en modules-initfs a proposito: ahi solo entran modulos, y el
+	# trigger es un write a /dev/wmtWifi que ademas necesita al BTIF ya
+	# registrado. Un oneshot antes de NetworkManager es lo que hace falta.
+	install -Dm755 "$srcdir/mediatek-wifi.sh" \
+		"$pkgdir/usr/libexec/mediatek-wifi.sh"
+	install -Dm644 "$builddir/mediatek-wifi.service" \
+		"$pkgdir/usr/lib/systemd/system/mediatek-wifi.service"
+
+	# El servicio tiene que arrancar en cada boot. Mismo idiom que el paquete
+	# device de Kupfer: symlink en multi-user.target.wants.
+	mkdir -p "$pkgdir/usr/lib/systemd/system/multi-user.target.wants"
+	ln -sf /usr/lib/systemd/system/mediatek-wifi.service \
+		"$pkgdir/usr/lib/systemd/system/multi-user.target.wants/mediatek-wifi.service"
 }
 
 # Los tres ficheros de source= son del propio arbol, no descargas, asi que el
@@ -53,4 +75,6 @@ sha512sums="
 dc903434ed9c23667007f5df17ee2126d3e0f4eb07c203dc70f117919a8f41d54b04c193b8cb8355cceec71d20f1a054737659e3caa493943c871d0d4caba31f  deviceinfo
 d89b08ef9888faae6cb96a378421669e6119023307a3b5a109e18b7f9e2c70e1f8b240ba8f9b9d22d319fa28e416565d06074d34382f482c9b037b7ab3f4861c  kernel-cmdline.conf
 fb17475e434aa5c1c7ee3103ef3dc5bd1d663184764d770f5c4944a2ea1901fc5351296ca5dc8e3dc3bf74aac1718f49b932f8be0b39add770c5851c708482b8  modules-initfs
+4ee4046504c8c1b28170a23d8387396165c0d2903ccbf84972ebb8b5f0c6db77d24727b11838bce0f346ee8b2e1f6251d2ae8be9f4c71769e4d52e0cce6e30d4  mediatek-wifi.sh
+289719074e643bb8f36453fcacca7b37da2cd768a507610e5c97ef00c61ffa46acf4fbee31b0bc38e4679446446a04a73ca607b8af9becbecd2b64fcf6866d95  mediatek-wifi.service
 "

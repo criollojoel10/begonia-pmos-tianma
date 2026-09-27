@@ -1,0 +1,16 @@
+[Unit]
+Description=Wifi interno de MediaTek (begonia MT6785)
+Documentation=man:mediatek-wifi
+# NetworkManager es quien associationa despues; solo hace falta el hardware listo.
+After=systemd-modules-load.service dbus.service
+Before=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/mediatek-wifi.sh
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,10 @@
 maintainer="Dinolek <git@dinolek.me>"
 pkgname=firmware-xiaomi-begonia
 pkgver=20260617
-pkgrel=0
+# pkgrel>=1 por lo mismo que en device-xiaomi-begonia: apk toma
+# firmware-xiaomi-begonia-20260617-r0 de edge si pkgrel=0, y entonces este
+# APKBUILD no se ejecuta y los blobs no llegan a la imagen.
+pkgrel=1
 pkgdesc="Firmware for Xiaomi Redmi Note 8 Pro"
 subpackages="
 	$pkgname-touchscreen
@@ -47,20 +50,36 @@ touchscreen() {
 connectivity() {
 	pkgdesc="Xiaomi Redmi Note 8 Pro WiFi/Bluetooth connectivity firmware"
 
+	# OJO: en la RAIZ de /lib/firmware/, no en un subdirectorio. El fwport de
+	# minorum llama a request_firmware() con nombres pelados, sin carpeta:
+	#   wmt_conf.h:34        "WMT_SOC.cfg"
+	#   wmt_dev.c:406,459,508 "soc1_0_patch_mcu_2a_1_hdr.bin"
+	#   wmt_ctrl.c:654-656   "soc1_0_ram_{bt,wifi,mcu}_2a_1_hdr.bin"
+	#   config.h:149         "WIFI_RAM_CODE" -> connacConstructFirmwarePrio()
+	#                        genera "WIFI_RAM_CODE_soc1_0_2a_1.bin"
+	#   gl_init.c:3322,3372  "wifi.cfg"
+	# Asi que el kernel solo los encuentra en /lib/firmware/ (o /usr/lib/
+	# firmware/) en la raiz. Con los ficheros en firmware/mediatek/, que es
+	# donde los metimos en los builds anteriores, modprobe wmt_drv falla con
+	#   (NULL device *): Direct firmware load for WMT_SOC.cfg failed with
+	#   error -2
+	#   [HIF-SDIO][E]wmt_dev_patch_get(413):failed to open or read!(WMT_SOC.cfg)
+	# y wlan0 no aparece nunca. Los .zst los descomprime el kernel solo
+	# (CONFIG_FW_LOADER_COMPRESS_ZSTD=y).
 	install -Dm644 "$builddir/mediatek/WIFI_RAM_CODE_soc1_0_2a_1.bin.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/WMT_SOC.cfg.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/soc1_0_patch_mcu_2a_1_hdr.bin.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/soc1_0_ram_bt_2a_1_hdr.bin.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/soc1_0_ram_mcu_2a_1_hdr.bin.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/soc1_0_ram_wifi_2a_1_hdr.bin.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 	install -Dm644 "$builddir/mediatek/wifi.cfg.zst" -t \
-		"$subpkgdir/lib/firmware/mediatek/"
+		"$subpkgdir/lib/firmware/"
 }
 
 sha512sums="
