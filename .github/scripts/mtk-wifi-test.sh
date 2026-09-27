@@ -39,8 +39,13 @@ FW=/usr/lib/firmware/mediatek
 [ -d "$FW" ] || FW=/lib/firmware/mediatek
 if [ -d "$FW" ]; then
 	ok "$FW existe"
+	# Los 7 blobs del subpaquete firmware-xiaomi-begonia-connectivity.
+	# wifi.cfg no se lista al principio en el APKBUILD, pero es imprescindible:
+	# sin el, conninfra no tiene parametros de configuracion y el firmware no
+	# arranca.
 	for f in WMT_SOC.cfg soc1_0_patch_mcu_2a_1_hdr.bin soc1_0_ram_mcu_2a_1_hdr.bin \
-		soc1_0_ram_wifi_2a_1_hdr.bin soc1_0_ram_bt_2a_1_hdr.bin WIFI_RAM_CODE_soc1_0_2a_1.bin; do
+		soc1_0_ram_wifi_2a_1_hdr.bin soc1_0_ram_bt_2a_1_hdr.bin WIFI_RAM_CODE_soc1_0_2a_1.bin \
+		wifi.cfg; do
 		if [ -e "$FW/$f" ] || [ -e "$FW/$f.zst" ]; then
 			ok "$f"
 		else
