@@ -37,7 +37,8 @@ for line in \
   "" \
   "# Wi-Fi Realtek 88xx por USB (8812AU / 8821AU / 8822BU: los dongles AC)" \
   "# OJO: RTW88 es el menuconfig PADRE (tristate, depends on MAC80211) y todos" \
-  "# los drivers de la familia viven dentro de `if RTW88`. Sin el padre a m," \
+  "# los drivers de la familia viven dentro de 'if RTW88'. Sin el padre a" \
+  "# m, olddefconfig descarta CORE/USB/8812AU/8821AU/8822BU en silencio y" \
   "# olddefconfig descarta CORE/USB/8812AU/8821AU/8822BU en silencio y no se" \
   "# compila ningun rtw88_*.ko (es lo que paso en el run 36277664585)." \
   "CONFIG_RTW88=m" \

@@ -194,7 +194,20 @@ jobs:
       - name: Enable USB Ethernet & WiFi dongle drivers (+ MTK gen4m opcional)
         env:
           MTK_GEN4M: ${{ inputs.mtk_gen4m }}
-        run: bash .github/scripts/enable_kernel_drivers.sh
+        run: |
+          # bash -n NO detecta el fallo que se comio el run 36288294044: los
+          # backticks dentro de un string con comillas dobles son sintaxis
+          # valida, pero bash los ejecuta como command substitution. Un
+          # "if RTW88" escrito asi es un error de sintaxis que aborta SOLO el
+          # bucle for que lo contiene (los 21 dongles) y el script sigue con
+          # exit 0. El .config se queda sin los dongles y el fallo solo
+          # aparece 40 minutos despues, en el verify de modulos.
+          bash -n .github/scripts/enable_kernel_drivers.sh
+          if grep -n '`' .github/scripts/enable_kernel_drivers.sh | grep -v '^[0-9]*:#'; then
+            echo "::error::backticks fuera de comentarios: bash los ejecuta como command substitution"
+            exit 1
+          fi
+          bash .github/scripts/enable_kernel_drivers.sh
 
       - name: Force rebuild kernel (begonia-conn-wifi) with new drivers
         run: |
