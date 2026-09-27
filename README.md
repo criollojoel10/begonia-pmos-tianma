@@ -242,9 +242,13 @@ afirmaciones muy distintas para este driver.
   de 2026 sin que nadie lo mueva, que es lo razonable para una importación de fabricante de ~545k
   líneas etiquetada como *"not proposing merge yet"*. Somos los primeros en probarlo en pmOS con
   este empaquetado, y los primeros en llevarlo a Kupfer.
-- El `RUNTIME-UNPROVEN` que sí aparece en el árbol es **más estrecho y más antiguo** que todo eso:
-  está en `mediatek-wifi.sh`, pegado al write de `1`, y habla solo del **orden** del `func_on` (un
-  `func_on` a pelo, sin el BTIF registrado antes, no arranca). No es un veredicto sobre el driver.
+- El `RUNTIME-UNPROVEN` que sí aparece en el árbol es **más estrecho y más antiguo** que todo eso,
+  y no está en ningún fichero de este port: está en el fichero del kernel que el fwport añade para
+  el trigger, `drivers/misc/mediatek/connectivity/common/common_main/linux/wmt_wifi_trigger.c:16`,
+  como una nota para quien lo porte: *"compile/link verified only ... the end-to-end bring-up has
+  not been exercised on a device"*, y solo duda del **orden** del `func_on`. Su commit
+  `ac488ea5` es del 18/06 a las 02:27; los verificados en hardware, `b8c1b8b5` (08:18) y
+  `0468921f` (09:25), son de ese mismo día. Sencillamente no se actualizó el comentario.
 - Una preocupación que miré y descarté: `WIFI_EINT` y los pines `gpio_combo_*` faltan en el DTS,
   pero pertenecen al camino reimpl ya retirado (`MTK_CONNINFRA_MT6785`, que el MR !2 apaga a
   propósito por conflicto con el consys de fabricante), no al forward-port que corre. Esa lectura es
