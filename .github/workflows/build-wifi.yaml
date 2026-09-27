@@ -457,19 +457,33 @@ jobs:
         if: always()
         run: |
           set +e
-          IR=$(ls -S artifacts/images/initramfs* 2>/dev/null | head -1)
+          IR=$(ls -S "$GITHUB_WORKSPACE"/artifacts/images/initramfs* 2>/dev/null | head -1)
           if [ -z "$IR" ]; then
             echo "::warning::no hay initramfs en el artifact, no se puede verificar"
             exit 0
           fi
-          echo "initramfs: $IR"
+          echo "initramfs: $IR ($(stat -c%s "$IR") bytes)"
           rm -rf /tmp/ir && mkdir -p /tmp/ir && cd /tmp/ir
-          case "$(file -b "$IR")" in
-            *gzip*) zcat "$IR" | cpio -idm --quiet 2>/dev/null ;;
-            *zstd*) zstd -dc "$IR" | cpio -idm --quiet 2>/dev/null ;;
-            *cpio*)  cpio -idm --quiet < "$IR" 2>/dev/null ;;
-            *)       cpio -idm --quiet < "$IR" 2>/dev/null ;;
+          # OJO: el initramfs de pmOS es un cpio comprimido y `file` no esta instalado
+          # en el runner, asi que el formato se decide por los bytes magicos. Y la
+          # ruta tiene que ser ABSOLUTA: antes se hacia `cd /tmp/ir` y luego se
+          # usaba la ruta relativa, con lo que la redireccion de cpio fallaba en
+          # silencio y el check::*error::*:: acusaba 8 modulos que si estaban.
+          magic=$(head -c4 "$IR" | od -An -tx1 | tr -d ' \n')
+          case "$magic" in
+            1f8b*)      echo "formato: gzip"; zcat "$IR" | cpio -idm 2>/tmp/ir.err ;;
+            28b52ffd*)  echo "formato: zstd"; zstd -dc "$IR" | cpio -idm 2>/tmp/ir.err ;;
+            30373037*)  echo "formato: cpio(newc)"; cpio -idm 2>/tmp/ir.err < "$IR" ;;
+            *)          echo "::error::formato de initramfs desconocido (magic=$magic)"; exit 1 ;;
           esac
+          n=$(find /tmp/ir -type f | wc -l)
+          echo "ficheros extraidos: $n"
+          if [ "$n" -lt 10 ]; then
+            echo "::error::el initramfs no se ha podido descomprimir"
+            sed -n '1,5p' /tmp/ir.err | sed 's/^/    /'
+            exit 1
+          fi
+          cd /tmp/ir
           missing=0
           for m in novatek-nvt-ts-core novatek-nvt-ts-spi panel-novatek-nt36672a \
                    ti-lmu leds-ti-lmu-common lm363x-regulator lm36274_bl; do
