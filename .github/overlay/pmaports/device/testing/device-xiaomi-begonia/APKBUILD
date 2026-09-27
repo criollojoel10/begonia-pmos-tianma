@@ -3,7 +3,13 @@ maintainer="Dinolek <git@dinolek.me>"
 pkgname=device-xiaomi-begonia
 pkgdesc="Xiaomi Redmi Note 8 Pro"
 pkgver=6
-pkgrel=0
+# pkgrel=1, NO 0: sin esto apk da por buena la version publicada en edge
+# (device-xiaomi-begonia-6-r0) en vez de construir la de este arbol, que es
+# la unica que depende de firmware-xiaomi-begonia-connectivity. Con pkgrel=0
+# el build 36304158010 salio verde installing el paquete de edge y los 7 blobs
+# de /lib/firmware/mediatek/ se quedaron fuera de la imagen: sin ellos
+# wlan_gen4m no puede pedir firmware y wlan0 no aparece nunca.
+pkgrel=1
 url="https://postmarketos.org"
 license="MIT"
 arch="aarch64"

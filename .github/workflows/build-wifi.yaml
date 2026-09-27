@@ -374,6 +374,48 @@ jobs:
             echo "OK: el nombre CSOT contiene el binario Tianma"
           '
 
+      # Guarda contra la trampa de apk mas cara de este workflow: si la version
+      # local de un APKBUILD sobrepuesto coincide con la publicada en el repo,
+      # apk USA la del repo y no construye la nuestra. Con eso, la dependencia
+      # firmware-xiaomi-begonia-connectivity se pierde en silencio (el paquete
+      # connectivity si se construye, simplemente no se instala) y la imagen
+      # sale verde, arranca y no tiene ni un blob de /lib/firmware/mediatek/,
+      # que es exactamente lo que necesita wlan_gen4m para pedir su firmware.
+      - name: Verify MediaTek connectivity firmware in the rootfs
+        run: |
+          set -euo pipefail
+          CROSS="${{ github.event.inputs.cross }}"
+          FLAGS=(-c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 --details-to-stdout)
+          if [ "$CROSS" = "false" ]; then
+            FLAGS+=(--no-cross)
+          fi
+          # 1) el subpaquete esta registrado como instalado, no solo construido
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            grep -q "^P:firmware-xiaomi-begonia-connectivity$" /lib/apk/db/installed || {
+              echo "::error::firmware-xiaomi-begonia-connectivity NO esta instalado (apk uso el paquete del repo)"; exit 1; }
+            echo "OK: firmware-xiaomi-begonia-connectivity instalado"
+          '
+          # 2) y device-xiaomi-begonia lo declara en sus depends (si no, el 1 es casualidad)
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            grep -q "^D:.*firmware-xiaomi-begonia-connectivity" /lib/apk/db/installed || {
+              echo "::error::device-xiaomi-begonia no depende de firmware-xiaomi-begonia-connectivity (se instalo la version del repo, sube pkgrel)"; exit 1; }
+            echo "OK: device-xiaomi-begonia depende del subpaquete connectivity"
+          '
+          # 3) los 7 blobs, con tamano no nulo. Son los que wlan_gen4m/wmt_drv
+          #    piden con request_firmware(); sin ellos wlan0 no aparece.
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            set -e
+            D=/lib/firmware/mediatek
+            ls -l $D
+            for f in WIFI_RAM_CODE_soc1_0_2a_1.bin.zst WMT_SOC.cfg.zst \
+                     soc1_0_patch_mcu_2a_1_hdr.bin.zst soc1_0_ram_bt_2a_1_hdr.bin.zst \
+                     soc1_0_ram_mcu_2a_1_hdr.bin.zst soc1_0_ram_wifi_2a_1_hdr.bin.zst \
+                     wifi.cfg.zst; do
+              test -s "$D/$f" || { echo "::error::falta o vacio $D/$f (el wifi interno no cargara firmware)"; exit 1; }
+            done
+            echo "OK: los 7 blobs demediatek estan en la imagen"
+          '
+
       - name: Build & Add Plasma Mobile UI
         run: |
           set -euxo pipefail
