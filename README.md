@@ -4,6 +4,15 @@ Compila postmarketOS **edge con el kernel mainline 6.16.4** para el Xiaomi Redmi
 
 El build corre en el runner (no se necesita hardware local potente) y produce artefactos listos para flashear por fastboot.
 
+## Estado: build verde
+
+El run **`36304158010`** (commit `bfc2bdb`) salió **verde** el 27-09-2026: kernel
+con los drivers, initramfs con el firmware Tianma, Plasma Mobile y export. El
+artifact son 4,3 GB y ya está descargado y verificado en
+`work-begonia/kupfer-img/pmos-img/x/` (initramfs con 377 ficheros, los 7
+módulos de panel/táctil dentro y el md5 del firmware Tianma bajo el nombre
+CSOT). Instrucciones de flasheo en `kupfer-img/LEEME-flash.md`.
+
 ## El problema que resuelve
 
 El kernel mainline que trae pmOS **solo soporta la variante de panel CSOT**, y pmOS instala **solo el firmware CSOT** del táctil. Los Redmi Note 8 Pro con panel **Tianma** (como el de este proyecto) quedan con el **touch invertido**: la pantalla enciende y no hay ningún error en el log, pero los ejes van cruzados.
