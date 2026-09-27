@@ -134,9 +134,12 @@ jobs:
           # pkgrel>=1. Recalcularlo aqui hace que editar deviceinfo no pueda
           # volver a tumbar el build.
           python3 .github/scripts/fix-device-checksums.py "$PMAPORTS_DIR"
-          # Comprobacion de que el fichero que se va a compilar ya cuadra:
+          # Comprobacion de que el fichero que se va a compilar ya cuadra. El
+          # bloque se extrae entero, sin decir cuantos ficheros hay: el
+          # "grep -A5" de antes solo miraba cinco, y con un sexto fichero en
+          # source= se comia el final del bloque y pasaba sin comprobar nada.
           cd "$PMAPORTS_DIR/device/testing/device-xiaomi-begonia"
-          sha512sum -c <(grep -A5 '^sha512sums="' APKBUILD | tail -n +2 | tr -d '"')
+          sed -n '/^sha512sums="/,/^"/p' APKBUILD | sed '1d;$d' | sha512sum -c
 
       - name: Inspect
         run: |
