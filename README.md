@@ -11,7 +11,19 @@ con los drivers, initramfs con el firmware Tianma, los 7 blobs MediaTek en la
 rootfs, Plasma Mobile y export. Artifact `pmos-begonia-wifi-6.16.4-cross-false`
 (id `10928553872`). Instrucciones de flasheo en `kupfer-img/LEEME-flash.md`.
 
-### Los dos runs anteriores y por qué ya no valen
+**Esa imagen arranca y tiene wifi, pero le faltan dos correcciones** que solo se
+ven con el móvil delante, y que van en el commit `e9569e7` (run `36330479935`):
+
+- Los blobs de conectividad estaban en `/lib/firmware/mediatek/` y el driver los
+  pide **por nombre pelado**, en la **raíz** de `/lib/firmware/`. Sin ese cambio el
+  wifi no arranca en absoluto.
+- La imagen arrancaba con `greetd` y un selector de sesión. Ahora arranca directo en
+  Plasma Mobile.
+
+Mientras tanto, la imagen `36309275971` sí se puede usar, y así se verificaron el
+touch, la pantalla y el wifi. Ver `LEEME-flash.md` §1.
+
+### Los runs anteriores y por qué ya no valen
 
 | Run | Commit | Qué pasó |
 |---|---|---|
@@ -130,7 +142,8 @@ del 7.1/MR !8852:
 - Aplica overlays en `pmaports` (sin parches `git am`, para no depender de commits móviles):
   - `linux-postmarketos-mediatek-mt6785/APKBUILD` → kernel `minorum/linux` @ `3a1ea769` (build gcc).
   - `firmware-xiaomi-begonia/APKBUILD` → commit `33aa9fe1` con subpaquete nuevo
-    `firmware-xiaomi-begonia-connectivity` (7 blobs MTK en `/lib/firmware/mediatek/`).
+    `firmware-xiaomi-begonia-connectivity` (7 blobs MTK **en la raíz** de `/lib/firmware/`, porque
+    el driver los pide por nombre pelado; ver §"Firmware que pide").
   - `device-xiaomi-begonia/` → depende de `firmware-xiaomi-begonia-connectivity` y lleva
     `deviceinfo_flash_fastboot_partition_vbmeta="vbmeta"`.
 - `.github/scripts/enable_kernel_drivers.sh` activa en el config del kernel:
@@ -202,10 +215,24 @@ modprobe wlan_gen4m             # registra el probe de gen4m
 printf 1 > /dev/wmtWifi         # wmt_dev_set_hif_btif() + mtk_wcn_wmt_func_on(WIFI)
 ```
 
-### Firmware que pide (ya está en la imagen)
+### Firmware que pide: en la RAÍZ, no en `mediatek/`
 
-`firmware-xiaomi-begonia-connectivity` los instala en `/lib/firmware/mediatek/`, y el kernel tiene
-`CONFIG_FW_LOADER_COMPRESS_ZSTD=y` así que los `.zst` los descomprime él:
+**Los 7 blobs van en la raíz de `/lib/firmware/`, no en `/lib/firmware/mediatek/`.** El driver llama
+a `request_firmware()` con nombres pelados, sin prefijo de directorio, así que el kernel los busca
+directamente en la raíz. Estando en el subdirectorio el error es:
+
+```
+Direct firmware load for WMT_SOC.cfg failed with error -2
+[HIF-SDIO][E]wmt_dev_patch_get(413):failed to open or read!(WMT_SOC.cfg)
+```
+
+y como `wmt_drv` no arranca, no hay `/dev/wmtWifi`, y sin `/dev/wmtWifi` no hay `wlan0`. El
+firmware estaba en la imagen todo el tiempo, solo que en el sitio que el driver no mira.
+
+El paquete `firmware-xiaomi-begonia-touchscreen` sí va en su subdirectorio (`novatek/`), porque
+ese driver sí pide el nombre con prefijo de directorio.
+
+El kernel tiene `CONFIG_FW_LOADER_COMPRESS_ZSTD=y`, así que los `.zst` los descomprime él:
 
 | Fichero | Lo pide |
 |---|---|
@@ -231,20 +258,33 @@ cajón que los que sí se leen.
 No hace falta EEPROM de calibración: el driver lo pide como `CFG_EEPRM_FILENAME_MT%x.bin`, y si el
 fichero no está cae al **modo eFuse** (`ucSourceMode = 0`), que es lo normal en un móvil.
 
-### El wifi: verificado por su autor, sin probar por nosotros
+### El wifi: verificado en hardware, por su autor y por nosotros
 
 Merece la pena ser preciso, porque "nunca se ha ejecutado" y "nadie lo ha ejecutado" son
 afirmaciones muy distintas para este driver.
 
-- **El driver funciona en este móvil, y lo verificó quien lo escribió.** El forward-port es el MR
+**Verificado por nosotros, de punta a punta, en un begonia real** (27-09-2026, kernel 6.16.4 con
+`mtk_gen4m`, imagen `pmos` de este repo): tras la corrección del firmware (§ anterior), la secuencia
+`modprobe mtk-vendor-btif` → `modprobe wmt_drv` (crea `/dev/wmtWifi`, `crw-rw---- 10,262`) →
+`modprobe wlan_gen4m` → `printf 1 > /dev/wmtWifi` da `[wmtWifi] WIFI function ON`, aparecen los
+netdevs `wlan0 wlan1 p2p0 ap0`, escanea más de 20 redes en 2.4 y 5 GHz, se asocia a una red de 5 GHz
+con `nmcli`, toma **192.168.1.103/24 por DHCP** con ruta por defecto, y hay ping, DNS y HTTPS
+correctos. Y en **arranque en frío**, sin tocar nada: `mediatek-wifi.service` sale `0/SUCCESS` y
+NetworkManager autoconnecta solo. La secuencia está congelada en
+`.github/scripts/mtk-wifi-test.sh`, que da un veredicto y es lo que se copia al móvil.
+
+**El autor del driver también lo verificó en su propio hardware**, y eso es independiente de lo
+anterior:
+
+- El forward-port es el MR
   !2 de `mt6785-mainline/linux` (*"Draft: begonia (MT6785): conn/WiFi vendor forward-port"*), de
   **minorum**: su descripción afirma que `wlan0` escanea y se asocia en 2.4 y 5 GHz, con DHCP y ping
   verificados en hardware. El historial encaja con eso: el commit `b8c1b8b5` ("Verified on
   hardware: this clears the 'no hif info' gate; STP/BTIF now activates") y los volcados de registros
   en vivo de `0468921f` son apuntes de bring-up, no teoría. Nuestro kernel es la punta de esa serie
   (`3a1ea76942`).
-- **Fuera de ese bring-up, nadie ha probado este stack en un begonia.** El MR !2 no tiene ni un
-  comentario y nadie ha contestado, así que no hay un segundo informe de nadie. Es un MR
+- **Fuera de ese bring-up, no hay ningún otro informe**: el MR !2 no tiene ni un comentario y nadie
+  ha contestado, así que la verificación de este repo es el primer segundo informe. Es un MR
   *cross-fork* (del fork del autor, `minorum/linux`, a `mt6785-mainline/linux`) y lleva desde junio
   de 2026 sin que nadie lo mueva, que es lo razonable para una importación de fabricante de ~545k
   líneas etiquetada como *"not proposing merge yet"*. Somos los primeros en probarlo en pmOS con
@@ -296,6 +336,49 @@ Las dos vías que podrían parecer un atajo se descartan solas:
 **El BT usable es el de un dongle USB** (`btusb`). El blob `soc1_0_ram_bt` se queda en la imagen
 porque forma parte del set que carga el bring-up de wifi, no porque sirva para algo hoy.
 
+**Probado en el móvil, y el resultado es negativo por una causa concreta.** El driver expone
+`/proc/driver/wmt_user_proc` con la operación `func_ctrl` por tipo de función, y `WMTDRV_TYPE_BT = 0`
+(`wmt_exp.h:108`). Escribiendo `printf "0 0 1"` (encender la función BT) sale rc=0 y en dmesg:
+
+```
+[HIF-SDIO][I]mtk_wcn_wmt_func_ctrl:OPID(3) type(0) ok
+[WMT-DEV][I]wmt_user_proc_func_ctrl:function test return 1
+MTK-BTIF-DMA[D]btif_tx_dma_ctrl:BTIF Tx DMA enabled
+MTK-BTIF[D]_btif_state_set:ON->DPIDLE request
+```
+
+O sea que el MCU de conectividad, el bus BTIF con DMA y el canal de control WMT funcionan: todo lo
+que hay **por debajo** de HCI está vivo. Pero ese comando **no carga el firmware de BT al MCU**,
+porque el blob `soc1_0_ram_bt` no aparece ni en `wmt_step.c` (que solo tiene los trigger-points de
+`func_ctrl` para BT), ni en `wmt_dev.c`, ni en `wmt_ctrl.c`. En el stack de fábrica ese
+`request_firmware()` lo hace precisamente el driver HCI, que es el que falta. Por eso el
+`func_ctrl` devuelve éxito y aun así no aparece `hci0`: son dos capas distintas, y la que se puede
+probar está debajo de la que falta.
+
+### El arranque: Plasma Mobile directo, nada de phosh ni de selector
+
+La imagen se compila con `ui = plasma-mobile`, así que **no se instala `greetd`** (lo arrastra
+`postmarketos-ui-phosh`, vía `greetd-phrog`) y el arranque directo lo hace `plasma-mobile.service`.
+Con la configuración anterior (`ui = phosh`) el móvil pintaba un selector de sesión con las tres
+entradas de `/usr/share/wayland-sessions/` y había que elegir Plasma Mobile a mano.
+
+Tres detalles de este servicio que no se ven leyendo el unit y que hay que resolver en el CI:
+
+- **`[Install]` solo trae `Alias=display-manager.service`, sin `WantedBy=`.** O sea que
+  `systemctl enable plasma-mobile.service` crea únicamente el alias y **no** mete la unidad en ningún
+  target: sola no arrancaría al boot. El CI crea además el
+  `multi-user.target.wants/plasma-mobile.service` a mano.
+- Ese mismo `enable` **falla** si el symlink ya existe: `File ... already exists and is a symlink to
+  .../greetd.service`, porque no sobreescribe symlinks. El CI lo borra antes.
+- El unit trae `User=1000`, que **no es el usuario**: pmbootstrap crea al usuario con **uid 10000**
+  (`adduser -D -u 10000`). El user correcto lo saca de `/etc/default_user`, que es lo que lee el
+  generador `system-generators-plasma-mobile-user-override` para su drop-in `User=`/`Group=`. Sin
+  ese fichero cae a 10000, que hoy coincide por casualidad; el CI lo escribe explícitamente.
+
+El CI lo comprueba sobre la imagen ya montada, y falla si aparece `phosh`, `greetd` o
+`phosh.desktop`, si el alias `display-manager.service` no apunta a `plasma-mobile.service`, si falta
+el wants symlink, o si `/etc/default_user` está vacío.
+
 Ejecutar igual que el workflow Tianma (Actions → **Build pmOS begonia (WiFi/Bluetooth, kernel 6.16.4...)**). El flasheo y la verificación son los mismos (sección de abajo); `uname -r` dará `6.16.4-postmarketos-mediatek-mt6785`.
 
 ## Flasheo (fastboot)
@@ -311,19 +394,58 @@ El `vbmeta.img` se genera con `avbtool make_vbmeta_image --flags 2 --padding_siz
 
 ## Verificación
 
-USB networking (RNDIS): dispositivo `172.16.42.1`, host `172.16.42.2/24`.
+Por USB (RNDIS): dispositivo `172.16.42.1`, host `172.16.42.2/24`.
 
 ```
 ssh joel@172.16.42.1
-uname -r          # 7.1.x-postmarketos-mediatek-mt6785
+uname -r          # 6.16.4-postmarketos-mediatek-mt6785
 ```
 
-Touch Tianma: en `/proc/device-tree` o `dmesg` debe aparecer el panel `xiaomi,begonia-tianma-nt36672a`.
+La contraseña de `joel` la pone el propio build (`pmbootstrap install --password 147147`).
 
-## Estado del WiFi (verificado en el dispositivo, kernel 6.16.4)
+**Por wifi, sin cable**: el móvil pide IP por DHCP al arrancar y toma la que le toque (la primera
+vez fue `192.168.1.103`). El host tiene que estar en la misma red.
 
-El SoC WiFi/BT de begonia usa el stack propietario de MediaTek (`wmt`/`connsys`/`btif`),
-que NO está en el kernel 6.16.4 mainline. Verificado en el dispositivo real:
+```
+ssh joel@192.168.1.103
+```
+
+### Tailscale, para llegar desde fuera de la red local
+
+`tailscale` está en los repos de Alpine (`tailscale` + `tailscale-systemd`) y el móvil tiene
+`/dev/net/tun` con el módulo `tun` cargado, así que se instala con `apk add tailscale` y
+`systemctl enable --now tailscaled`. La autenticación es de una sola vez, contra la cuenta de
+tailscale.com:
+
+```
+sudo tailscale up          # imprime https://login.tailscale.com/a/<id>
+```
+
+Después, el móvil es alcanzable por su IP de tailscale desde cualquier sitio, sin cable y sin
+estar en la misma red. `tailscaled` se queda como un nodo más de la cuenta.
+
+### Touch Tianma: en `/proc/device-tree` o `dmesg` debe aparecer el panel
+`xiaomi,begonia-tianma-nt36672a`.
+
+### WiFi: `wlan0` con IP por DHCP y ruta por defecto
+
+```
+systemctl status mediatek-wifi    # active (exited), sale 0
+ip -br addr show wlan0            # wlan0  UP  192.168.1.103/24
+ip route show default             # default via 192.168.1.1 dev wlan0
+```
+
+El servicio de arranque es `mediatek-wifi.service` (`/usr/libexec/mediatek-wifi.sh`), instalado y
+habilitado por el paquete `device-xiaomi-begonia`. Va como servicio y no en `modules-initfs` porque
+su disparador es un **write a `/dev/wmtWifi`**, y a `modules-initfs` solo entran módulos. La
+secuencia que ejecuta es: `mtk-vendor-btif` → `wmt_drv` (crea `/dev/wmtWifi`) → `wlan_gen4m` →
+encender la función wifi del MCU de conectividad, y después deja que NetworkManager asocie.
+
+## Estado del WiFi en el kernel MAINLINE pelado (sin el stack de MediaTek)
+
+Esto describe el **kernel 6.16.4 mainline sin `mtk_gen4m`**, no la imagen de este repo, que sí lo
+compila. El SoC WiFi/BT de begonia usa el stack propietario de MediaTek
+(`wmt`/`connsys`/`btif`), que no está en mainline. Comprobado en el dispositivo real:
 
 - Sin nodo WiFi/BT en el device-tree (`/proc/device-tree` sin `wifi`/`wlan`/`consys`).
 - Sin drivers de radio compilados (ni `mt76` ni `wmt`/`connsys` ni `btmtk`). Solo existen
@@ -331,8 +453,9 @@ que NO está en el kernel 6.16.4 mainline. Verificado en el dispositivo real:
 - Sin firmware en `/lib/firmware/mediatek/`.
 - Único rfkill presente: `nfc0` (NFC, no WiFi/BT).
 
-Conclusión: **con este kernel tal cual (sin `mtk_gen4m`) no hay WiFi**, porque el
-forward-port del stack vendor existe en el árbol pero está `default n` en Kconfig. Ver abajo.
+Conclusión: **con ese kernel tal cual no hay WiFi**, porque el forward-port del stack vendor existe
+en el árbol pero está `default n` en Kconfig. Ver abajo, y el resultado con el stack ya en §
+"El wifi: verificado en hardware".
 
 ## El stack de conectividad está en el MISMO commit que ya compilamos
 
@@ -383,6 +506,22 @@ un kernel que se compiló sin ellos no pase por verde.
 
 ## Errores que no hay que repetir
 
+- **El firmware de un driver se instala donde el driver lo pide, no donde el
+  fabricante lo tenía.** Los blobs de conectividad se packagingaban en
+  `/lib/firmware/mediatek/` (su ruta degutida, y la que trae la MR de firmware del
+  autor) y el driver los carga con `request_firmware()` **por nombre pelado**, así
+  que los busca en la raíz de `/lib/firmware/`. El síntoma es
+  `Direct firmware load for WMT_SOC.cfg failed with error -2` y, en cascada, la
+  ausencia de `/dev/wmtWifi` y de `wlan0`. Se lee en el propio driver
+  (`wmt_conf.h:34`, `wmt_dev.c:406/459/508`, `wmt_ctrl.c:654-656`), y la regla
+  general es: si el driver pasa un nombre con prefijo de directorio, el firmware
+  va en un subdirectorio; si lo pasa pelado, en la raíz.
+- **No dar por bueno un `enable` de systemd sin comprobar que la unidad entra en
+  un target.** `plasma-mobile.service` trae en `[Install]` solo
+  `Alias=display-manager.service`, sin `WantedBy=`: `systemctl enable` crea el
+  alias y nada más, así que el servicio no arranca al boot. Y si el symlink del
+  alias ya existe, `enable` **falla** en vez de sobreescribirlo. Presets
+  tampoco sirven de nada aquí: un preset solo se aplica al instalar el paquete.
 - **Un `APKBUILD` sobrepuesto con la MISMA versión que la publicada no se
   construye: apk usa la del repo.** Es la trampa más cara de este workflow,
   porque no da ningún error. El `device-xiaomi-begonia` sobrepuesto solo
@@ -391,12 +530,15 @@ un kernel que se compiló sin ellos no pase por verde.
   versión que hay publicada en `edge`, así que apk instaló la del repo y la
   dependencia nueva desapareció sin quejarse. El subpaquete `connectivity` sí se
   construía (766,5 KB, se ve en el log) pero al no depender de él nadie lo
-  instalaba, y la imagen salía **verde, arrancaba y no tenía ni un blob en
-  `/lib/firmware/mediatek/`**: justo lo que `wlan_gen4m` necesita para pedir
-  firmware por `request_firmware()`, o sea que `wlan0` no podía aparecer nunca.
+  instalaba, y la imagen salía **verde, arrancaba y no tenía ni un blob de
+  conectividad**: justo lo que `wlan_gen4m` necesita, porque el driver pide su
+  firmware con `request_firmware()`, o sea que `wlan0` no podía aparecer nunca.
   Lo delata `/lib/apk/db/installed` (el `D:` de `device-xiaomi-begonia` sin
   `-connectivity`). **Regla: cualquier cambio de `depends` en un APKBUILD
-  sobrepuesto va con `pkgrel` subido.** El `firmware-xiaomi-begonia` se
+  sobrepuesto va con `pkgrel` subido.** Y ojo con el segundo fallo, encadenado a
+  este: los blobs tampoco habrían servido donde estaban, en
+  `/lib/firmware/mediatek/`, porque el driver los pide por nombre pelado. Aunque
+  el paquete se hubiera instalado, el wifi habría seguido sin arrancar. El `firmware-xiaomi-begonia` se
   construía bien solo porque su `pkgver` (20260617) es más nuevo que el
   publicado (20250810). Y el `pkgrel` era lo único que ocultaba el
   `sha512sums` roto de abajo: con `pkgrel=0` el paquete no llegaba a
