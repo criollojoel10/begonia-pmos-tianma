@@ -412,17 +412,37 @@ ssh joel@192.168.1.103
 
 ### Tailscale, para llegar desde fuera de la red local
 
-`tailscale` está en los repos de Alpine (`tailscale` + `tailscale-systemd`) y el móvil tiene
-`/dev/net/tun` con el módulo `tun` cargado, así que se instala con `apk add tailscale` y
-`systemctl enable --now tailscaled`. La autenticación es de una sola vez, contra la cuenta de
-tailscale.com:
+`tailscale` está en los repos de Alpine (`tailscale` + `tailscale-systemd`, `1.102.4-r0`) y el móvil
+tiene `/dev/net/tun` con el módulo `tun` cargado (`CONFIG_TUN=m`), así que no hace falta ningún
+binario estático:
 
 ```
+apk add tailscale
+systemctl enable --now tailscaled
 sudo tailscale up          # imprime https://login.tailscale.com/a/<id>
+sudo tailscale up --ssh    # además habilita el servidor de Tailscale SSH
 ```
 
-Después, el móvil es alcanzable por su IP de tailscale desde cualquier sitio, sin cable y sin
-estar en la misma red. `tailscaled` se queda como un nodo más de la cuenta.
+La autenticación es de una sola vez, contra la cuenta de tailscale.com. Con `--ssh` el móvil
+aparece en la tailnet y se entra **sin contraseña local**: Tailscale SSH autentica por la
+identidad del tailnet, no por la clave del usuario del sistema.
+
+```
+ssh joel@xiaomi-begonia.taile971a.ts.net    # o ssh joel@100.127.99.71
+```
+
+El sufijo de MagicDNS es el de tu tailnet (`taile971a.ts.net` aquí), no `tail-scale.ts.net`; se
+saca de `tailscale status --json | jq -r .Self.DNSName`. `sudo` sigue pidiendo la clave local
+(`147147`), porque Tailscale SSH autentica el acceso pero no salta de `sudo`.
+
+Verificado en el begonia: tras `sudo systemctl reboot` **por tailscale y sin cable**, el móvil
+volvió solo por la misma ruta (uptime 33 s) con `tailscaled`, `sshd`, `NetworkManager`,
+`mediatek-wifi` y `plasma-mobile` los cinco `enabled`+`active`, `wlan0` con `192.168.1.103/24`,
+`tailscale0` con `100.127.99.71/32`, ruta por defecto por `wlan0` y ping a `1.1.1.1` correcto.
+
+Tailscale SSH intercepta el 22 en la IP de tailscale; el `sshd` normal sigue escuchando en `wlan0`
+y en el USB, así que las tres vías (`192.168.1.103`, `100.127.99.71`, `172.16.42.1`) siguen
+funcionando.
 
 ### Touch Tianma: en `/proc/device-tree` o `dmesg` debe aparecer el panel
 `xiaomi,begonia-tianma-nt36672a`.
