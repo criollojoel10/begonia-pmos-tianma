@@ -111,13 +111,21 @@ jobs:
           OVERLAY_ROOT="$GITHUB_WORKSPACE/.github/overlay/pmaports"
           cp -rv "$OVERLAY_ROOT/device/testing/linux-postmarketos-mediatek-mt6785/APKBUILD" \
             "$PMAPORTS_DIR/device/testing/linux-postmarketos-mediatek-mt6785/APKBUILD"
-          cp -rv "$OVERLAY_ROOT/device/testing/firmware-xiaomi-begonia/APKBUILD" \
-            "$PMAPORTS_DIR/device/testing/firmware-xiaomi-begonia/APKBUILD"
-          cp -rv "$OVERLAY_ROOT/device/testing/device-xiaomi-begonia/APKBUILD" \
-            "$OVERLAY_ROOT/device/testing/device-xiaomi-begonia/deviceinfo" \
-            "$OVERLAY_ROOT/device/testing/device-xiaomi-begonia/kernel-cmdline.conf" \
-            "$OVERLAY_ROOT/device/testing/device-xiaomi-begonia/modules-initfs" \
-            "$PMAPORTS_DIR/device/testing/device-xiaomi-begonia/"
+          # Se copia el CONTENIDO del directorio de cada paquete, no una lista de
+          # ficheros. La lista era el bug: cuando se anadio
+          # mediatek-wifi.{sh,service} al source= del APKBUILD del dispositivo,
+          # esos dos ficheros se quedaron en el repo y nunca llegaron al arbol
+          # de pmaports del runner. abuild entonces decia
+          #   >>> ERROR: device-xiaomi-begonia: mediatek-wifi.sh is missing in checksums
+          # porque el fichero no estaba donde el paquete lo busca. Con esto,
+          # cualquier fichero nuevo que se anada al paquete entra solo.
+          for pkg in linux-postmarketos-mediatek-mt6785 firmware-xiaomi-begonia \
+                     device-xiaomi-begonia; do
+            test -d "$OVERLAY_ROOT/device/testing/$pkg"
+            test -d "$PMAPORTS_DIR/device/testing/$pkg"
+            cp -rv "$OVERLAY_ROOT/device/testing/$pkg/." \
+              "$PMAPORTS_DIR/device/testing/$pkg/"
+          done
           echo "=== Overlaid kernel APKBUILD (head) ==="
           head -35 "$PMAPORTS_DIR/device/testing/linux-postmarketos-mediatek-mt6785/APKBUILD"
 

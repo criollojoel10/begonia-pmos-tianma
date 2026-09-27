@@ -108,26 +108,43 @@ def main() -> int:
         print(f"ERROR: no existe {apk}", file=sys.stderr)
         return 1
 
-    # Todo lo que este en source= y exista en el arbol se recalcula. Lo que no
-    # exista (una descarga) conserva el hash que ya tenia, porque recalcularlo
-    # aqui no es posible y borrarlo seria peor. La lista NO esta hardcodeada a
-    # proposito: la primera version la tenia, y al anadir
+    # Todo lo que este en source= y exista en el arbol se recalcula. La lista
+    # NO esta hardcodeada a proposito: la primera version la tenia, y al anadir
     # mediatek-wifi.{sh,service} al source= se te olvidó updatingarla, con lo que
     # el bloque se reescribia sin ellos y abuild abortaba con
     #   >>> ERROR: device-xiaomi-begonia: mediatek-wifi.sh is missing in checksums
     # Sin paquete no hay rootfs, ni initramfs, ni imagen, y todos los pasos
     # siguientes fallan en cascada (asi fue el run 36330479935).
+    #
+    # Un nombre de source= que no este en el arbol solo puede ser una descarga
+    # si parece una: lleva esquema (://) o es un camino. Si no parece ninguna de
+    # las dos cosas, es un fichero que el overlay no copio, y ahi se para. Sin
+    # este corte, el fichero ausente se clasificaba como descarga, se
+    # conservaba su hash viejo, el paso pasaba en verde y el error salia 30
+    # minutos despues en abuild, sin relacion aparente: asi fue el run
+    # 36332551577, donde esto mismo paso y el chequeo de despues se limito a
+    # decir "mediatek-wifi.sh: No such file or directory".
     prev = parse_current_sums(apk)
     local, remote = [], []
     for name in parse_source(apk):
         if (d / name).is_file():
             local.append(name)
-        else:
-            remote.append(name)
-            if name not in prev:
-                print(f"ERROR: {name} esta en source=, no es fichero local y no "
-                      f"tiene hash en sha512sums", file=sys.stderr)
-                return 1
+            continue
+        if "://" not in name and "/" not in name:
+            print(
+                f"ERROR: {name} esta en source= del APKBUILD pero no existe en "
+                f"{d}. No es una descarga (no lleva esquema ni ruta), asi que lo "
+                f"que falta es que el paso 'Apply overlays' no lo copio desde el "
+                f"repo. Sin el, abuild dira 'is missing in checksums' mas "
+                f"adelante.",
+                file=sys.stderr,
+            )
+            return 1
+        remote.append(name)
+        if name not in prev:
+            print(f"ERROR: {name} esta en source=, no es fichero local y no "
+                  f"tiene hash en sha512sums", file=sys.stderr)
+            return 1
     if not local:
         print("ERROR: source= no aporta ningun fichero local", file=sys.stderr)
         return 1
