@@ -131,7 +131,11 @@ dmesg 2>/dev/null | grep -iE "request_firmware|firmware.*fail|failed to load|WMT
 if [ -d /sys/class/net/wlan0 ]; then
 	ok "wlan0 existe"
 	ip -o link show wlan0 2>/dev/null | sed 's/^/    /'
-	iw dev 2>/dev/null | sed 's/^/    /' || info "(iw no instalado)"
+	if command -v iw >/dev/null 2>&1; then
+		iw dev 2>&1 | sed 's/^/    /'
+	else
+		info "(iw no esta instalado: no se puede ver el modo de la interfaz)"
+	fi
 	if command -v rfkill >/dev/null 2>&1; then
 		rfkill list 2>/dev/null | grep -i wlan | sed 's/^/    /'
 	fi
