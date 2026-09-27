@@ -121,6 +121,23 @@ jobs:
           echo "=== Overlaid kernel APKBUILD (head) ==="
           head -35 "$PMAPORTS_DIR/device/testing/linux-postmarketos-mediatek-mt6785/APKBUILD"
 
+      - name: Recompute sha512sums of the local device files
+        run: |
+          set -euxo pipefail
+          # deviceinfo/kernel-cmdline.conf/modules-initfs son ficheros del
+          # propio arbol, pero el sha512sums del APKBUILD de pmaports es el de
+          # los suyos. Como este deviceinfo esta modificado (sector 4096 +
+          # flash sparse), el hash no cuadra y abuild aborta al compilar el
+          # paquete. El run 36307235048 murio aqui con
+          #   >>> ERROR: device-xiaomi-begonia: Use 'abuild checksum' ...
+          # y solo se ve cuando el paquete se construye de verdad, o sea con
+          # pkgrel>=1. Recalcularlo aqui hace que editar deviceinfo no pueda
+          # volver a tumbar el build.
+          python3 .github/scripts/fix-device-checksums.py "$PMAPORTS_DIR"
+          # Comprobacion de que el fichero que se va a compilar ya cuadra:
+          cd "$PMAPORTS_DIR/device/testing/device-xiaomi-begonia"
+          sha512sum -c <(grep -A5 '^sha512sums="' APKBUILD | tail -n +2 | tr -d '"')
+
       - name: Inspect
         run: |
           mkdir -p artifacts/preflight

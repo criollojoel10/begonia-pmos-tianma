@@ -327,7 +327,27 @@ un kernel que se compiló sin ellos no pase por verde.
   `-connectivity`). **Regla: cualquier cambio de `depends` en un APKBUILD
   sobrepuesto va con `pkgrel` subido.** El `firmware-xiaomi-begonia` se
   construía bien solo porque su `pkgver` (20260617) es más nuevo que el
-  publicado (20250810).
+  publicado (20250810). Y el `pkgrel` era lo único que ocultaba el
+  `sha512sums` roto de abajo: con `pkgrel=0` el paquete no llegaba a
+  compilarse nunca, así que su hash jamás se comprobaba.
+- **El `sha512sums` de un APKBUILD sobrepuesto hay que rehacerlo, y solo se
+  comprueba si el paquete se construye de verdad.** `deviceinfo`,
+  `kernel-cmdline.conf` y `modules-initfs` son ficheros del propio árbol (no
+  descargas), pero el `sha512sums` que trae el APKBUILD de pmaports es el de
+  **los suyos**, y nuestro `deviceinfo` está modificado (sector 4096 +
+  `deviceinfo_flash_sparse`), así que el hash es otro. Al subir `pkgrel` a 1 el
+  paquete sí se compiló y el run `36307235048` murió en
+  `/home/pmos/build/deviceinfo: FAILED` →
+  `>>> ERROR: device-xiaomi-begonia: Use 'abuild checksum' to generate/update the checksum(s)`.
+  El error dice literalmente qué hacer, pero ojo: `abuild checksum` dentro de
+  pmbootstrap necesita el chroot y es un paso lento. Por eso el hash bueno está
+  escrito a mano en el APKBUILD **y** hay un paso de CI,
+  `Recompute sha512sums of the local device files`
+  (`.github/scripts/fix-device-checksums.py`), que reescribe el bloque en la
+  *copia* del APKBUILD dentro del árbol de pmaports del runner y luego lo
+  verifica con `sha512sum -c`. Así editar `deviceinfo` no puede volver a tumbar
+  el build. El mismo aviso aplica a `kernel-cmdline.conf` y `modules-initfs` si
+  se tocan.
 - **`zstd` ausente en makedepends rompe el kernel.** El config de pmaports trae
   `CONFIG_MODULE_COMPRESS_ZSTD=y` + `MODULE_COMPRESS_ALL=y`, así que `modules_install` invoca el
   binario `zstd` y sin él falla con
