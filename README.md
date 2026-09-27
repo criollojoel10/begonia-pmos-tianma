@@ -1,28 +1,21 @@
 # begonia-pmos-tianma
 
-Compila postmarketOS **edge con kernel 7.1 + variante Tianma** para el Xiaomi Redmi Note 8 Pro (`xiaomi-begonia`), en GitHub Actions, con drivers USB-OTG/dongle (Ethernet + WiFi + serial). Incluye **KDE Plasma Mobile**.
+Compila postmarketOS **edge con el kernel mainline 6.16.4** para el Xiaomi Redmi Note 8 Pro (`xiaomi-begonia`) en GitHub Actions, con el **stack de conectividad interno de MediaTek** (wifi `wlan_gen4m`) y los drivers USB-OTG/dongle (Ethernet + WiFi + serial). Incluye **KDE Plasma Mobile**.
 
 El build corre en el runner (no se necesita hardware local potente) y produce artefactos listos para flashear por fastboot.
 
 ## El problema que resuelve
 
-El kernel mainline 6.16.4 que trae pmOS **solo soporta la variante de panel CSOT**. Los Redmi Note 8 Pro con panel **Tianma** (como el de este proyecto) quedan con el **touch invertido**.
+El kernel mainline que trae pmOS **solo soporta la variante de panel CSOT**, y pmOS instala **solo el firmware CSOT** del táctil. Los Redmi Note 8 Pro con panel **Tianma** (como el de este proyecto) quedan con el **touch invertido**: la pantalla enciende y no hay ningún error en el log, pero los ejes van cruzados.
 
 - `mt6785-xiaomi-begonia.dts` (6.16) tiene `compatible = "xiaomi,begonia-csot-nt36672a"` y `firmware-name = "novatek/nt36672a_begonia_csot.bin"`.
-- La rama **7.1** del kernel separa las dos variantes: `mt6785-xiaomi-begonia-csot.dts` y `mt6785-xiaomi-begonia-tianma.dts`.
+- La rama **7.1** del kernel (MR !8852 de Dinolek) separa las dos variantes en dos DTS y en dos subpackages de kernel, pero **no está mergeada** en el commit de pmaports que usa este repo, así que aquí se compila el 6.16.4.
 
-La solución es el **MR !8852** de Dinolek ("Update mt6785 kernel to 7.1, add support for Tianma variant"), que:
+**Este repo lo resuelve en la imagen**: el paquete `firmware-xiaomi-begonia-touchscreen` instala los dos binarios y copia el **Tianma encima del nombre CSOT**, que es el que el driver pide. El initramfs se construye ya con el binario correcto, así que el táctil va bien en el primer arranque sin tocar nada el móvil. El CI lo comprueba comparando el md5 del fichero (un `ls` no lo detecta: los dos nombres existen siempre).
 
-1. Actualiza el kernel a **7.1** (build con **clang/LLVM**, BTF, Shadow Call Stack).
-2. Parte el device en **subpackages de kernel**: `device-xiaomi-begonia-kernel-csot` y `device-xiaomi-begonia-kernel-tianma`.
-3. Añade el firmware de touch **Tianma** (`nt36672a_begonia_tianma.bin`).
-4. Actualiza `modules-initfs` (mediatek-drm, panel-novatek-nt36672a, etc.).
+## Si aun así el touch sale invertido (sw manual)
 
-Este repo aplica ese MR como parche y selecciona la variante `tianma` vía `kernel = tianma` en la config de pmbootstrap.
-
-## Método rápido confirmado: swap de firmware tianma en el kernel 6.16.4 (sin rebuild)
-
-**No hace falta kernel 7.1 ni MR !8852 para el touch en 6.16.4.** El touch Tianma funciona copiando el firmware tianma con el **nombre que el DTB espera** (`nt36672a_begonia_csot.bin`), porque el driver `novatek-nvt-ts-core` lee `firmware-name` del device-tree y hace `request_firmware` con ese nombre exacto. El DTB 6.16.4 solo referencia la variante csot, así que el binario tianma debe usar ese nombre.
+**No hace falta kernel 7.1 ni MR !8852 para el touch en 6.16.4.** El touch Tianma funciona copiando el firmware tianma con el **nombre que el DTB espera** (`nt36672a_begonia_csot.bin`), porque el driver `novatek-nvt-ts-spi` lee `firmware-name` del device-tree y hace `request_firmware` con ese nombre exacto. El DTB 6.16.4 solo referencia la variante csot, así que el binario tianma debe usar ese nombre. Es lo que hace el paquete de firmware de este repo al construir la imagen; esto es el equivalente manual por si hubiera que rehacerlo en un móvil ya instalado.
 
 Pasos (en el device, vía SSH):
 

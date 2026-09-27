@@ -26,8 +26,20 @@ package() {
 touchscreen() {
 	pkgdesc="Xiaomi Redmi Note 8 Pro touchscreen firmware"
 
+	# Esta unidad es de panel Tianma. El DTB de la rama 6.16 (la unica que hay
+	# para begonia) solo conoce la variante CSOT: el panel declara
+	# compatible = "xiaomi,begonia-csot-nt36672a" y el nodo del tactil pide
+	# firmware-name = "novatek/nt36672a_begonia_csot.bin", que el driver
+	# novatek-nvt-ts-spi pasa tal cual a request_firmware(). Con el binario
+	# equivocado el panel se enciende pero el touch sale con los ejes cruzados,
+	# sin ningun error en el log. Por eso el nombre CSOT se sirve con el
+	# binario Tianma (md5 7d67c2e9167f1a630576c177c1b831f7).
+	install -Dm644 "$builddir/novatek/nt36672a_begonia_tianma.bin.zst" -t \
+		"$subpkgdir/lib/firmware/novatek/"
 	install -Dm644 "$builddir/novatek/nt36672a_begonia_csot.bin.zst" -t \
 		"$subpkgdir/lib/firmware/novatek/"
+	cp -f "$subpkgdir/lib/firmware/novatek/nt36672a_begonia_tianma.bin.zst" \
+		"$subpkgdir/lib/firmware/novatek/nt36672a_begonia_csot.bin.zst"
 	install -Dm644 "$srcdir/10-touch-firmware.files" -t \
 		"$subpkgdir/usr/share/mkinitfs/files/"
 }

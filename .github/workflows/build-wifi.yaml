@@ -335,6 +335,32 @@ jobs:
           fi
           exit "$missing"
 
+      - name: Verify touch firmware (panel Tianma bajo el nombre CSOT)
+        run: |
+          set -euo pipefail
+          CROSS="${{ github.event.inputs.cross }}"
+          FLAGS=(-c "$PMB_CONFIG" -p "$PMAPORTS_DIR" -w "$PMB_WORK" -t 3600 --details-to-stdout)
+          if [ "$CROSS" = "false" ]; then
+            FLAGS+=(--no-cross)
+          fi
+          # El DTB 6.16 pide "novatek/nt36672a_begonia_csot.bin" y el driver del
+          # tactil lo carga tal cual. En una unidad Tianma ese nombre tiene que
+          # contener el binario Tianma, o el panel enciende y el touch sale con
+          # los ejes cruzados sin decir nada en el log. Un simple "existe el
+          # fichero" no lo detecta: los dos nombres existen siempre.
+          #   tianma 53321 B md5 7d67c2e9167f1a630576c177c1b831f7
+          #   csot   53731 B md5 52f5e96f84fbdd6cbed2e98790a202df
+          pmbootstrap "${FLAGS[@]}" chroot --rootfs -- sh -c '
+            set -e
+            D=/lib/firmware/novatek
+            ls -l $D
+            md5sum $D/nt36672a_begonia_csot.bin.zst $D/nt36672a_begonia_tianma.bin.zst
+            test -s $D/nt36672a_begonia_tianma.bin.zst || { echo "FALTA el binario Tianma"; exit 1; }
+            test "$(md5sum $D/nt36672a_begonia_csot.bin.zst | cut -d" " -f1)" = 7d67c2e9167f1a630576c177c1b831f7 || {
+              echo "FALLO: el nombre CSOT no contiene el binario Tianma (touch invertido)"; exit 1; }
+            echo "OK: el nombre CSOT contiene el binario Tianma"
+          '
+
       - name: Build & Add Plasma Mobile UI
         run: |
           set -euxo pipefail
@@ -410,6 +436,52 @@ jobs:
           fi
           echo "SUCCESS: $CNT image file(s) found"
           find artifacts -type f -name "*.img" -o -name "boot*" -o -name "initramfs*" -o -name "vmlinuz*" 2>/dev/null | sort
+
+      # El initramfs es lo que arranca de verdad: el tactil se carga desde ahi
+      # (modulos-initfs) y el firmware tambien. Un rootfs correcto no dice nada
+      # si el initramfs se construyo con el binario del otro panel.
+      - name: Verify initramfs (modulos de panel/tactil + firmware Tianma)
+        if: always()
+        run: |
+          set +e
+          IR=$(ls -S artifacts/images/initramfs* 2>/dev/null | head -1)
+          if [ -z "$IR" ]; then
+            echo "::warning::no hay initramfs en el artifact, no se puede verificar"
+            exit 0
+          fi
+          echo "initramfs: $IR"
+          rm -rf /tmp/ir && mkdir -p /tmp/ir && cd /tmp/ir
+          case "$(file -b "$IR")" in
+            *gzip*) zcat "$IR" | cpio -idm --quiet 2>/dev/null ;;
+            *zstd*) zstd -dc "$IR" | cpio -idm --quiet 2>/dev/null ;;
+            *cpio*)  cpio -idm --quiet < "$IR" 2>/dev/null ;;
+            *)       cpio -idm --quiet < "$IR" 2>/dev/null ;;
+          esac
+          missing=0
+          for m in novatek-nvt-ts-core novatek-nvt-ts-spi panel-novatek-nt36672a \
+                   ti-lmu leds-ti-lmu-common lm363x-regulator lm36274_bl; do
+            if find . -name "${m}.ko*" | grep -q .; then
+              echo "OK initramfs ${m}"
+            else
+              echo "::error::falta ${m}.ko en el initramfs (la pantalla no tocara)"
+              missing=1
+            fi
+          done
+          CSOT=$(find . -name "nt36672a_begonia_csot.bin.zst" | head -1)
+          if [ -z "$CSOT" ]; then
+            echo "::error::no hay firmware del tactil en el initramfs"
+            missing=1
+          else
+            got=$(md5sum "$CSOT" | cut -d' ' -f1)
+            echo "firmware csot en el initramfs: $got"
+            if [ "$got" != "7d67c2e9167f1a630576c177c1b831f7" ]; then
+              echo "::error::el initramfs lleva el binario CSOT: el tactil saldra invertido"
+              missing=1
+            else
+              echo "OK: el initramfs lleva el binario Tianma bajo el nombre CSOT"
+            fi
+          fi
+          exit "$missing"
 
       - name: Checksums
         if: always()
