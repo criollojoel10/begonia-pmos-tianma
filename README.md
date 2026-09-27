@@ -330,6 +330,15 @@ un kernel que se compiló sin ellos no pase por verde.
   frágil, así que `enable_kernel_drivers.sh` borra las líneas `=y` heredadas y deja
   `# CONFIG_DEBUG_INFO_BTF is not set`, con verificación que aborta si BTF sigue activo. BTF solo
   lleva información de tipos para eBPF/CO-RE: no afecta a arranque, display, wifi, bt ni ethernet.
+- **Un backtick en un string con comillas dobles ejecuta código, también dentro de un `for` de
+  configuración.** El comentario que explicaba el `menuconfig` padre de RTW88 iba dentro del
+  `for line in ...` como `"# ... viven dentro de \`if RTW88\` ..."`, y bash interpretó los backticks
+  como command substitution: `if RTW88` no es un comando, así que el error de sintaxis abortó **solo
+  ese `for`** (los 21 dongles) y el script siguió con `exit 0`. El `.config` se quedaba sin
+  `USB_NET_*`/`RTL8XXXU`/`RTW88*`/`MT76*` y el fallo solo aparecía 40 minutos después, en el verify
+  de módulos, con 21 errores `el rootfs no trae <dongle>.ko` que no señalan el culpable.
+  `bash -n` **no** lo detecta (los backticks en comillas dobles son sintaxis válida); el workflow
+  hace ahora `bash -n` más un `grep` que rechaza backticks fuera de comentarios antes de ejecutarlo.
 - **No swapear solo el kernel** (6.16 → 7.1) sin regenerar el initramfs: los `.ko` del initramfs llevan `vermagic` de 6.16 y el kernel 7.1 no los carga → sin display/touch. Por eso se hace build completo con pmbootstrap.
 - **`flags=0` en vbmeta** → LK rechaza el boot (bootloop a fastboot). Usar `flags=2`.
 - **`kernel = tianma`** es obligatorio; con el default (`stable`) falla porque el device ya no depende directo del kernel (solo expone las subpackages `-kernel-csot`/`-kernel-tianma`).
